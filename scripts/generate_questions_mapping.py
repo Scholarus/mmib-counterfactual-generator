@@ -159,103 +159,85 @@ def create_counterfactual_questions(original_question, params, scene):
         while retry_count < max_retries:
             cf_q = None
             cf_params = {}
-        
-        if strategy == 'attribute_swap' and params:
-            cf_params = params.copy()
-            param_to_change = random.choice(list(params.keys()))
             
-            if param_to_change == 'color':
-                alternatives = [c for c in props['all_colors'] if c != params.get('color')]
-                if alternatives:
-                    cf_params['color'] = random.choice(alternatives)
-                else:
-                    strategy = 'negation'
-                    continue
-            elif param_to_change == 'shape':
-                alternatives = [s for s in props['all_shapes'] if s != params.get('shape')]
-                if alternatives:
-                    cf_params['shape'] = random.choice(alternatives)
-                else:
-                    strategy = 'negation'
-                    continue
-            elif param_to_change == 'material':
-                alternatives = [m for m in props['all_materials'] if m != params.get('material')]
-                if alternatives:
-                    cf_params['material'] = random.choice(alternatives)
-                else:
-                    strategy = 'negation'
-                    continue
-            elif param_to_change == 'size':
-                alternatives = [s for s in props['all_sizes'] if s != params.get('size')]
-                if alternatives:
-                    cf_params['size'] = random.choice(alternatives)
-                else:
-                    strategy = 'negation'
-                    continue
+            if strategy == 'attribute_swap' and params:
+                cf_params = params.copy()
+                param_to_change = random.choice(list(params.keys()))
+                
+                if param_to_change == 'color':
+                    alternatives = [c for c in props['all_colors'] if c != params.get('color')]
+                    if alternatives:
+                        cf_params['color'] = random.choice(alternatives)
+                    else:
+                        strategy = 'negation'
+                        continue
+                elif param_to_change == 'shape':
+                    alternatives = [s for s in props['all_shapes'] if s != params.get('shape')]
+                    if alternatives:
+                        cf_params['shape'] = random.choice(alternatives)
+                    else:
+                        strategy = 'negation'
+                        continue
+                elif param_to_change == 'material':
+                    alternatives = [m for m in props['all_materials'] if m != params.get('material')]
+                    if alternatives:
+                        cf_params['material'] = random.choice(alternatives)
+                    else:
+                        strategy = 'negation'
+                        continue
+                elif param_to_change == 'size':
+                    alternatives = [s for s in props['all_sizes'] if s != params.get('size')]
+                    if alternatives:
+                        cf_params['size'] = random.choice(alternatives)
+                    else:
+                        strategy = 'negation'
+                        continue
+                
+                cf_q = original_question
+                for key, old_val in params.items():
+                    new_val = cf_params[key]
+                    if old_val != new_val:
+                        cf_q = cf_q.replace(old_val, new_val)
             
-            cf_q = original_question
-            for key, old_val in params.items():
-                new_val = cf_params[key]
-                if old_val != new_val:
-                    cf_q = cf_q.replace(old_val, new_val)
-        
-        elif strategy == 'question_type':
-            cf_params = params.copy() if params else {}
-            if "How many" in original_question and "objects are in the scene" in original_question:
-                if props['colors']:
-                    color = random.choice(props['colors'])
-                    cf_q = f"How many {color} objects are there?"
-                    cf_params = {'color': color}
-                elif props['shapes']:
-                    shape = random.choice(props['shapes'])
-                    cf_q = f"Are there any {shape}s?"
-                    cf_params = {'shape': shape}
-                else:
-                    cf_q = "Are there more than 3 objects?"
-                    cf_params = {}
-            elif "How many" in original_question:
-                cf_q = original_question.replace("How many", "Are there any")
-                cf_q = cf_q.replace(" are there?", "?")
-                cf_q = cf_q.replace(" are in the scene?", " in the scene?")
-            elif "Are there" in original_question or "Is there" in original_question:
-                if "Are there any" in original_question:
-                    cf_q = original_question.replace("Are there any", "How many")
-                    if not cf_q.endswith(" are there?"):
-                        cf_q = cf_q.replace("?", " are there?")
-                elif "Is there a" in original_question:
-                    cf_q = original_question.replace("Is there a", "How many")
-                    if not cf_q.endswith(" are there?"):
-                        cf_q = cf_q.replace("?", " are there?")
-                else:
+            elif strategy == 'question_type':
+                cf_params = params.copy() if params else {}
+                if "How many" in original_question and "objects are in the scene" in original_question:
                     if props['colors']:
                         color = random.choice(props['colors'])
                         cf_q = f"How many {color} objects are there?"
                         cf_params = {'color': color}
+                    elif props['shapes']:
+                        shape = random.choice(props['shapes'])
+                        cf_q = f"Are there any {shape}s?"
+                        cf_params = {'shape': shape}
                     else:
-                        cf_q = "How many objects are in the scene?"
+                        cf_q = "Are there more than 3 objects?"
                         cf_params = {}
-            elif "What is" in original_question:
-                cf_q = original_question.replace("What is the total number of", "How many")
-            else:
-                # Fallback: add specificity
-                if props['colors']:
-                    color = random.choice(props['colors'])
-                    cf_q = f"How many {color} objects are there?"
-                    cf_params = {'color': color}
+                elif "How many" in original_question:
+                    cf_q = original_question.replace("How many", "Are there any")
+                    cf_q = cf_q.replace(" are there?", "?")
+                    cf_q = cf_q.replace(" are in the scene?", " in the scene?")
+                elif "Are there" in original_question or "Is there" in original_question:
+                    if "Are there any" in original_question:
+                        cf_q = original_question.replace("Are there any", "How many")
+                        if not cf_q.endswith(" are there?"):
+                            cf_q = cf_q.replace("?", " are there?")
+                    elif "Is there a" in original_question:
+                        cf_q = original_question.replace("Is there a", "How many")
+                        if not cf_q.endswith(" are there?"):
+                            cf_q = cf_q.replace("?", " are there?")
+                    else:
+                        if props['colors']:
+                            color = random.choice(props['colors'])
+                            cf_q = f"How many {color} objects are there?"
+                            cf_params = {'color': color}
+                        else:
+                            cf_q = "How many objects are in the scene?"
+                            cf_params = {}
+                elif "What is" in original_question:
+                    cf_q = original_question.replace("What is the total number of", "How many")
                 else:
-                    cf_q = "Are there more than 3 objects?"
-                    cf_params = {}
-        
-        elif strategy == 'scope_change':
-            if params and len(params) >= 2:
-                cf_params = params.copy()
-                key_to_remove = random.choice(list(params.keys()))
-                del cf_params[key_to_remove]
-                
-                if len(cf_params) == 1:
-                    attr_val = list(cf_params.values())[0]
-                    cf_q = f"How many {attr_val} objects are there?"
-                else:
+                    # Fallback: add specificity
                     if props['colors']:
                         color = random.choice(props['colors'])
                         cf_q = f"How many {color} objects are there?"
@@ -263,147 +245,166 @@ def create_counterfactual_questions(original_question, params, scene):
                     else:
                         cf_q = "Are there more than 3 objects?"
                         cf_params = {}
-            elif params and len(params) == 1:
-                new_attr = random.choice(['material', 'size'])
-                if new_attr not in params:
-                    new_val = random.choice(props[new_attr + 's'])
-                    existing_key = list(params.keys())[0]
-                    existing_val = list(params.values())[0]
-                    cf_params = params.copy()
-                    cf_params[new_attr] = new_val
-                    if new_attr == 'size':
-                        cf_q = f"How many {new_val} {existing_val} objects are there?"
-                    elif new_attr == 'material':
-                        if existing_key == 'size':
-                            cf_q = f"How many {existing_val} {new_val} objects are there?"
-                        else:
-                            cf_q = f"How many {existing_val} {new_val} objects are there?"
-                else:
-                    strategy = 'negation'
-                    continue
-            else:
-                if props['colors']:
-                    color = random.choice(props['colors'])
-                    cf_params = {'color': color}
-                    cf_q = f"How many {color} objects are there?"
-                elif props['shapes']:
-                    shape = random.choice(props['shapes'])
-                    cf_params = {'shape': shape}
-                    cf_q = f"Are there any {shape}s?"
-                else:
-                    cf_q = "Are there more than 3 objects?"
-                    cf_params = {}
-        
-        elif strategy == 'negation':
-            cf_params = params.copy() if params else {}
-            if params:
-                if 'color' in params:
-                    color = params['color']
-                    cf_q = f"How many objects are NOT {color}?"
-                elif 'shape' in params:
-                    shape = params['shape']
-                    cf_q = f"How many objects are NOT {shape}s?"
-                else:
-                    attr_val = list(params.values())[0]
-                    cf_q = f"How many objects are NOT {attr_val}?"
-            else:
-                cf_q = "Are there fewer than 5 objects?"
-                cf_params = {}
-        
-        elif strategy == 'comparative':
-            cf_params = params.copy() if params else {}
-            if "How many" in original_question:
-                number = random.choice([2, 3, 4, 5])
-                cf_q = original_question.replace("How many", f"Are there more than {number}")
-                cf_q = cf_q.replace(" are there?", "?")
-                cf_q = cf_q.replace(" are in the scene?", " in the scene?")
-            elif params:
-                if 'color' in params:
-                    color1 = params['color']
-                    alternatives = [c for c in props['all_colors'] if c != color1]
-                    if alternatives:
-                        color2 = random.choice(alternatives)
-                        cf_params = {'color': color1, 'color2': color2}
-                        cf_q = f"Are there more {color1} objects than {color2} objects?"
-                    else:
-                        cf_q = f"How many objects are NOT {color1}?"
-                        cf_params = {'color': color1}
-                elif 'shape' in params:
-                    shape1 = params['shape']
-                    alternatives = [s for s in props['all_shapes'] if s != shape1]
-                    if alternatives:
-                        shape2 = random.choice(alternatives)
-                        cf_params = {'shape': shape1, 'shape2': shape2}
-                        cf_q = f"Are there more {shape1}s than {shape2}s?"
-                    else:
-                        cf_q = f"How many objects are NOT {shape1}s?"
-                        cf_params = {'shape': shape1}
-                else:
-                    cf_q = "Are there more than 3 objects?"
-                    cf_params = {}
-            else:
-                cf_q = "Are there more than 3 objects?"
-                cf_params = {}
-        
-        elif strategy == 'multi_attribute':
-            if params and len(params) >= 2:
-                cf_params = {}
-                changed = False
-                for key in params:
-                    if key == 'color':
-                        alternatives = [c for c in props['all_colors'] if c != params[key]]
-                        if alternatives:
-                            cf_params[key] = random.choice(alternatives)
-                            changed = True
-                        else:
-                            cf_params[key] = params[key]
-                    elif key == 'shape':
-                        alternatives = [s for s in props['all_shapes'] if s != params[key]]
-                        if alternatives:
-                            cf_params[key] = random.choice(alternatives)
-                            changed = True
-                        else:
-                            cf_params[key] = params[key]
-                    elif key == 'material':
-                        alternatives = [m for m in props['all_materials'] if m != params[key]]
-                        if alternatives:
-                            cf_params[key] = random.choice(alternatives)
-                            changed = True
-                        else:
-                            cf_params[key] = params[key]
-                    elif key == 'size':
-                        alternatives = [s for s in props['all_sizes'] if s != params[key]]
-                        if alternatives:
-                            cf_params[key] = random.choice(alternatives)
-                            changed = True
-                        else:
-                            cf_params[key] = params[key]
-                
-                if not changed:
-                    strategy = 'negation'
-                    continue
-                
-                attr_order = ['size', 'color', 'material', 'shape']
-                ordered_values = []
-                for attr in attr_order:
-                    if attr in cf_params:
-                        ordered_values.append(cf_params[attr])
-                cf_q = f"How many {' '.join(ordered_values)} objects are there?"
-            else:
-                color = random.choice(props['colors'])
-                shape = random.choice(props['shapes'])
-                cf_params = {'color': color, 'shape': shape}
-                cf_q = f"Is there a {color} {shape}?"
-        
-        if cf_q is None:
-            cf_q = "How many objects are in the scene?"
-            cf_params = {}
-        
-        # Ensure cf_params is set
-        if not cf_params:
-            cf_params = {}
             
-            if cf_q.strip() != original_question.strip():
+            elif strategy == 'scope_change':
+                if params and len(params) >= 2:
+                    cf_params = params.copy()
+                    key_to_remove = random.choice(list(params.keys()))
+                    del cf_params[key_to_remove]
+                    
+                    if len(cf_params) == 1:
+                        attr_val = list(cf_params.values())[0]
+                        cf_q = f"How many {attr_val} objects are there?"
+                    else:
+                        if props['colors']:
+                            color = random.choice(props['colors'])
+                            cf_q = f"How many {color} objects are there?"
+                            cf_params = {'color': color}
+                        else:
+                            cf_q = "Are there more than 3 objects?"
+                            cf_params = {}
+                elif params and len(params) == 1:
+                    new_attr = random.choice(['material', 'size'])
+                    if new_attr not in params:
+                        new_val = random.choice(props[new_attr + 's'])
+                        existing_key = list(params.keys())[0]
+                        existing_val = list(params.values())[0]
+                        cf_params = params.copy()
+                        cf_params[new_attr] = new_val
+                        if new_attr == 'size':
+                            cf_q = f"How many {new_val} {existing_val} objects are there?"
+                        elif new_attr == 'material':
+                            if existing_key == 'size':
+                                cf_q = f"How many {existing_val} {new_val} objects are there?"
+                            else:
+                                cf_q = f"How many {existing_val} {new_val} objects are there?"
+                    else:
+                        strategy = 'negation'
+                        continue
+                else:
+                    if props['colors']:
+                        color = random.choice(props['colors'])
+                        cf_params = {'color': color}
+                        cf_q = f"How many {color} objects are there?"
+                    elif props['shapes']:
+                        shape = random.choice(props['shapes'])
+                        cf_params = {'shape': shape}
+                        cf_q = f"Are there any {shape}s?"
+                    else:
+                        cf_q = "Are there more than 3 objects?"
+                        cf_params = {}
+            
+            elif strategy == 'negation':
+                cf_params = params.copy() if params else {}
+                if params:
+                    if 'color' in params:
+                        color = params['color']
+                        cf_q = f"How many objects are NOT {color}?"
+                    elif 'shape' in params:
+                        shape = params['shape']
+                        cf_q = f"How many objects are NOT {shape}s?"
+                    else:
+                        attr_val = list(params.values())[0]
+                        cf_q = f"How many objects are NOT {attr_val}?"
+                else:
+                    cf_q = "Are there fewer than 5 objects?"
+                    cf_params = {}
+            
+            elif strategy == 'comparative':
+                cf_params = params.copy() if params else {}
+                if "How many" in original_question:
+                    number = random.choice([2, 3, 4, 5])
+                    cf_q = original_question.replace("How many", f"Are there more than {number}")
+                    cf_q = cf_q.replace(" are there?", "?")
+                    cf_q = cf_q.replace(" are in the scene?", " in the scene?")
+                elif params:
+                    if 'color' in params:
+                        color1 = params['color']
+                        alternatives = [c for c in props['all_colors'] if c != color1]
+                        if alternatives:
+                            color2 = random.choice(alternatives)
+                            cf_params = {'color': color1, 'color2': color2}
+                            cf_q = f"Are there more {color1} objects than {color2} objects?"
+                        else:
+                            cf_q = f"How many objects are NOT {color1}?"
+                            cf_params = {'color': color1}
+                    elif 'shape' in params:
+                        shape1 = params['shape']
+                        alternatives = [s for s in props['all_shapes'] if s != shape1]
+                        if alternatives:
+                            shape2 = random.choice(alternatives)
+                            cf_params = {'shape': shape1, 'shape2': shape2}
+                            cf_q = f"Are there more {shape1}s than {shape2}s?"
+                        else:
+                            cf_q = f"How many objects are NOT {shape1}s?"
+                            cf_params = {'shape': shape1}
+                    else:
+                        cf_q = "Are there more than 3 objects?"
+                        cf_params = {}
+                else:
+                    cf_q = "Are there more than 3 objects?"
+                    cf_params = {}
+            
+            elif strategy == 'multi_attribute':
+                if params and len(params) >= 2:
+                    cf_params = {}
+                    changed = False
+                    for key in params:
+                        if key == 'color':
+                            alternatives = [c for c in props['all_colors'] if c != params[key]]
+                            if alternatives:
+                                cf_params[key] = random.choice(alternatives)
+                                changed = True
+                            else:
+                                cf_params[key] = params[key]
+                        elif key == 'shape':
+                            alternatives = [s for s in props['all_shapes'] if s != params[key]]
+                            if alternatives:
+                                cf_params[key] = random.choice(alternatives)
+                                changed = True
+                            else:
+                                cf_params[key] = params[key]
+                        elif key == 'material':
+                            alternatives = [m for m in props['all_materials'] if m != params[key]]
+                            if alternatives:
+                                cf_params[key] = random.choice(alternatives)
+                                changed = True
+                            else:
+                                cf_params[key] = params[key]
+                        elif key == 'size':
+                            alternatives = [s for s in props['all_sizes'] if s != params[key]]
+                            if alternatives:
+                                cf_params[key] = random.choice(alternatives)
+                                changed = True
+                            else:
+                                cf_params[key] = params[key]
+                    
+                    if not changed:
+                        strategy = 'negation'
+                        continue
+                    
+                    attr_order = ['size', 'color', 'material', 'shape']
+                    ordered_values = []
+                    for attr in attr_order:
+                        if attr in cf_params:
+                            ordered_values.append(cf_params[attr])
+                    cf_q = f"How many {' '.join(ordered_values)} objects are there?"
+                else:
+                    color = random.choice(props['colors'])
+                    shape = random.choice(props['shapes'])
+                    cf_params = {'color': color, 'shape': shape}
+                    cf_q = f"Is there a {color} {shape}?"
+            
+            if cf_q is None:
+                cf_q = "How many objects are in the scene?"
+                cf_params = {}
+            
+            # Ensure cf_params is set
+            if not cf_params:
+                cf_params = {}
+            
+            # Check if we got a valid different question
+            if cf_q and cf_q.strip() != original_question.strip():
                 break
             
             retry_count += 1
@@ -414,7 +415,8 @@ def create_counterfactual_questions(original_question, params, scene):
                 else:
                     strategy = 'negation'
         
-        if cf_q.strip() == original_question.strip():
+        # Final check - if question is still the same, use fallback
+        if cf_q is None or cf_q.strip() == original_question.strip():
             if params:
                 if 'color' in params:
                     cf_q = f"How many objects are NOT {params['color']}?"
@@ -727,67 +729,116 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
                 print(f"WARNING: Scene {scene_num} missing scene files")
                 continue
             
-            print(f"Processing scene {idx+1}/{total_scenes}: {scene_num}")
+            print(f"[DEBUG] Processing scene {idx+1}/{total_scenes}: {scene_num}")
+            print(f"[DEBUG]   - original_scene_file: {original_scene_file}")
+            print(f"[DEBUG]   - cf1_scene_file: {cf1_scene_file}")
+            print(f"[DEBUG]   - cf2_scene_file: {cf2_scene_file}")
             
-            original_scene = load_scene(original_scene_file)
-            cf1_scene = load_scene(cf1_scene_file)
-            cf2_scene = load_scene(cf2_scene_file)
+            print(f"[DEBUG] Loading scenes...")
+            try:
+                original_scene = load_scene(original_scene_file)
+                print(f"[DEBUG]   - original_scene loaded: {original_scene is not None}")
+                cf1_scene = load_scene(cf1_scene_file)
+                print(f"[DEBUG]   - cf1_scene loaded: {cf1_scene is not None}")
+                cf2_scene = load_scene(cf2_scene_file)
+                print(f"[DEBUG]   - cf2_scene loaded: {cf2_scene is not None}")
+            except Exception as e:
+                print(f"[DEBUG] ERROR loading scenes: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
             
-            original_question, params = generate_question_for_scene(original_scene_file)
-            cf_questions = create_counterfactual_questions(original_question, params, original_scene)
-            cf1_question, cf1_params = cf_questions[0]
-            cf2_question, cf2_params = cf_questions[1]
+            print(f"[DEBUG] Generating questions...")
+            try:
+                original_question, params = generate_question_for_scene(original_scene_file)
+                print(f"[DEBUG]   - original_question: {original_question}")
+                print(f"[DEBUG]   - params: {params}")
+                cf_questions = create_counterfactual_questions(original_question, params, original_scene)
+                print(f"[DEBUG]   - cf_questions generated: {len(cf_questions) if cf_questions else 0}")
+                cf1_question, cf1_params = cf_questions[0]
+                cf2_question, cf2_params = cf_questions[1]
+                print(f"[DEBUG]   - cf1_question: {cf1_question}")
+                print(f"[DEBUG]   - cf2_question: {cf2_question}")
+            except Exception as e:
+                print(f"[DEBUG] ERROR generating questions: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
             
-            original_difficulty = calculate_question_difficulty(original_question, params)
-            cf1_difficulty = calculate_question_difficulty(cf1_question, cf1_params)
-            cf2_difficulty = calculate_question_difficulty(cf2_question, cf2_params)
+            print(f"[DEBUG] Calculating question difficulties...")
+            try:
+                original_difficulty = calculate_question_difficulty(original_question, params)
+                cf1_difficulty = calculate_question_difficulty(cf1_question, cf1_params)
+                cf2_difficulty = calculate_question_difficulty(cf2_question, cf2_params)
+                print(f"[DEBUG]   - difficulties calculated")
+            except Exception as e:
+                print(f"[DEBUG] ERROR calculating difficulties: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
             
-            original_ans_orig_q = answer_question_for_scene(original_question, original_scene)
-            original_ans_cf1_q = answer_question_for_scene(cf1_question, original_scene)
-            original_ans_cf2_q = answer_question_for_scene(cf2_question, original_scene)
-            
-            cf1_ans_orig_q = answer_question_for_scene(original_question, cf1_scene)
-            cf1_ans_cf1_q = answer_question_for_scene(cf1_question, cf1_scene)
-            cf1_ans_cf2_q = answer_question_for_scene(cf2_question, cf1_scene)
-            
-            cf2_ans_orig_q = answer_question_for_scene(original_question, cf2_scene)
-            cf2_ans_cf1_q = answer_question_for_scene(cf1_question, cf2_scene)
-            cf2_ans_cf2_q = answer_question_for_scene(cf2_question, cf2_scene)
-            
-            if with_links:
-                def make_link(filename, file_type='image'):
-                    if base_url:
-                        return f"{base_url.rstrip('/')}/{file_type}s/{filename}"
-                    else:
-                        return f"{file_type}s/{filename}"
+            print(f"[DEBUG] Answering questions...")
+            try:
+                original_ans_orig_q = answer_question_for_scene(original_question, original_scene)
+                original_ans_cf1_q = answer_question_for_scene(cf1_question, original_scene)
+                original_ans_cf2_q = answer_question_for_scene(cf2_question, original_scene)
                 
-                original_image_link = make_link(original_id, 'image')
-                original_scene_link = make_link(original_id.replace('.png', '.json'), 'scene')
-                cf1_image_link = make_link(cf1_id, 'image')
-                cf1_scene_link = make_link(cf1_id.replace('.png', '.json'), 'scene')
-                cf2_image_link = make_link(cf2_id, 'image')
-                cf2_scene_link = make_link(cf2_id.replace('.png', '.json'), 'scene')
+                cf1_ans_orig_q = answer_question_for_scene(original_question, cf1_scene)
+                cf1_ans_cf1_q = answer_question_for_scene(cf1_question, cf1_scene)
+                cf1_ans_cf2_q = answer_question_for_scene(cf2_question, cf1_scene)
                 
-                rows.append([
-                    scene_num,
-                    original_image_link, original_scene_link,
-                    cf1_image_link, cf1_scene_link,
-                    cf2_image_link, cf2_scene_link,
-                    original_question, cf1_question, cf2_question,
-                    original_difficulty, cf1_difficulty, cf2_difficulty,
-                    original_ans_orig_q, original_ans_cf1_q, original_ans_cf2_q,
-                    cf1_ans_orig_q, cf1_ans_cf1_q, cf1_ans_cf2_q,
-                    cf2_ans_orig_q, cf2_ans_cf1_q, cf2_ans_cf2_q
-                ])
-            else:
-                rows.append([
-                    original_id, cf1_id, cf2_id,
-                    original_question, cf1_question, cf2_question,
-                    original_difficulty, cf1_difficulty, cf2_difficulty,
-                    original_ans_orig_q, original_ans_cf1_q, original_ans_cf2_q,
-                    cf1_ans_orig_q, cf1_ans_cf1_q, cf1_ans_cf2_q,
-                    cf2_ans_orig_q, cf2_ans_cf1_q, cf2_ans_cf2_q
-                ])
+                cf2_ans_orig_q = answer_question_for_scene(original_question, cf2_scene)
+                cf2_ans_cf1_q = answer_question_for_scene(cf1_question, cf2_scene)
+                cf2_ans_cf2_q = answer_question_for_scene(cf2_question, cf2_scene)
+                print(f"[DEBUG]   - all answers calculated")
+            except Exception as e:
+                print(f"[DEBUG] ERROR answering questions: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+            
+            print(f"[DEBUG] Appending row to CSV...")
+            try:
+                if with_links:
+                    def make_link(filename, file_type='image'):
+                        if base_url:
+                            return f"{base_url.rstrip('/')}/{file_type}s/{filename}"
+                        else:
+                            return f"{file_type}s/{filename}"
+                    
+                    original_image_link = make_link(original_id, 'image')
+                    original_scene_link = make_link(original_id.replace('.png', '.json'), 'scene')
+                    cf1_image_link = make_link(cf1_id, 'image')
+                    cf1_scene_link = make_link(cf1_id.replace('.png', '.json'), 'scene')
+                    cf2_image_link = make_link(cf2_id, 'image')
+                    cf2_scene_link = make_link(cf2_id.replace('.png', '.json'), 'scene')
+                    
+                    rows.append([
+                        scene_num,
+                        original_image_link, original_scene_link,
+                        cf1_image_link, cf1_scene_link,
+                        cf2_image_link, cf2_scene_link,
+                        original_question, cf1_question, cf2_question,
+                        original_difficulty, cf1_difficulty, cf2_difficulty,
+                        original_ans_orig_q, original_ans_cf1_q, original_ans_cf2_q,
+                        cf1_ans_orig_q, cf1_ans_cf1_q, cf1_ans_cf2_q,
+                        cf2_ans_orig_q, cf2_ans_cf1_q, cf2_ans_cf2_q
+                    ])
+                else:
+                    rows.append([
+                        original_id, cf1_id, cf2_id,
+                        original_question, cf1_question, cf2_question,
+                        original_difficulty, cf1_difficulty, cf2_difficulty,
+                        original_ans_orig_q, original_ans_cf1_q, original_ans_cf2_q,
+                        cf1_ans_orig_q, cf1_ans_cf1_q, cf1_ans_cf2_q,
+                        cf2_ans_orig_q, cf2_ans_cf1_q, cf2_ans_cf2_q
+                    ])
+                print(f"[DEBUG]   - Row appended successfully. Total rows: {len(rows)}")
+            except Exception as e:
+                print(f"[DEBUG] ERROR appending row: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
         else:
             if with_links:
                 def make_link(filename, file_type='image'):
@@ -812,10 +863,26 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
             else:
                 rows.append([original_id, cf1_id, cf2_id])
     
+    print(f"[DEBUG] Writing CSV file...")
+    print(f"[DEBUG]   - Total rows to write: {len(rows)}")
     csv_path = os.path.join(run_dir, csv_filename)
-    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
-        writer.writerows(rows)
+    print(f"[DEBUG]   - CSV path: {csv_path}")
+    print(f"[DEBUG]   - run_dir exists: {os.path.exists(run_dir)}")
+    
+    try:
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            writer.writerows(rows)
+        print(f"[DEBUG]   - CSV file written successfully")
+        print(f"[DEBUG]   - CSV file exists: {os.path.exists(csv_path)}")
+        if os.path.exists(csv_path):
+            file_size = os.path.getsize(csv_path)
+            print(f"[DEBUG]   - CSV file size: {file_size} bytes")
+    except Exception as e:
+        print(f"[DEBUG] ERROR writing CSV file: {e}")
+        import traceback
+        traceback.print_exc()
+        return
     
     print(f"\n[OK] Generated mapping CSV: {csv_path}")
     print(f"  Total scene sets: {len(rows) - 1}")

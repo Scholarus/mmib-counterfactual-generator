@@ -27,13 +27,28 @@ try:
         NEGATIVE_COUNTERFACTUALS
     )
     try:
+        import sys
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        scripts_path = os.path.join(script_dir, 'scripts')
+        print(f"[DEBUG] Script directory: {script_dir}")
+        print(f"[DEBUG] Scripts path: {scripts_path}")
+        print(f"[DEBUG] Scripts path exists: {os.path.exists(scripts_path)}")
+        if scripts_path not in sys.path:
+            sys.path.insert(0, scripts_path)
+            print(f"[DEBUG] Added scripts_path to sys.path: {scripts_path}")
+        print(f"[DEBUG] Attempting to import from generate_questions_mapping...")
         from generate_questions_mapping import (
             load_scene,
             generate_question_for_scene as _generate_question_for_scene_file,
             answer_question_for_scene,
             generate_mapping_with_questions
         )
-    except ImportError:
+        print(f"[DEBUG] Successfully imported question generation functions")
+        print(f"[DEBUG] generate_mapping_with_questions is not None: {generate_mapping_with_questions is not None}")
+    except ImportError as e:
+        print(f"[DEBUG] Warning: Could not import question generation functions: {e}")
+        import traceback
+        traceback.print_exc()
         def load_scene(scene_file):
             with open(scene_file, 'r') as f:
                 return json.load(f)
@@ -42,6 +57,7 @@ try:
             return len(objects)
         _generate_question_for_scene_file = None
         generate_mapping_with_questions = None
+        print(f"[DEBUG] Set generate_mapping_with_questions to None")
     PIPELINE_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: Error importing pipeline functions: {e}")
@@ -243,6 +259,37 @@ def generate_counterfactual_scenes(num_scenes, num_objects, min_objects, max_obj
     os.makedirs(scenes_dir, exist_ok=True)
     os.makedirs(images_dir, exist_ok=True)
     
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    cwd = os.getcwd()
+    import shutil
+    import time
+    
+    temp_output_dir = os.path.join(cwd, 'temp_output')
+    if os.path.exists(temp_output_dir):
+        for attempt in range(3):
+            try:
+                shutil.rmtree(temp_output_dir)
+                break
+            except Exception as e:
+                if attempt < 2:
+                    time.sleep(0.3)
+                else:
+                    print(f"Warning: Could not remove temp_output after 3 attempts: {e}")
+    
+    render_patched_path = os.path.join(cwd, 'render_images_patched.py')
+    if os.path.exists(render_patched_path):
+        for attempt in range(3):
+            try:
+                time.sleep(0.2)
+                if os.path.exists(render_patched_path):
+                    os.remove(render_patched_path)
+                break
+            except Exception as e:
+                if attempt < 2:
+                    time.sleep(0.3)
+                else:
+                    print(f"Warning: Could not remove render_images_patched.py after 3 attempts: {e}")
+    
     blender_available = False
     if blender_path is None:
         try:
@@ -422,33 +469,65 @@ def generate_counterfactual_scenes(num_scenes, num_objects, min_objects, max_obj
         csv_filename = 'image_mapping_with_questions.csv' if generate_questions else 'image_mapping.csv'
         csv_path = os.path.join(output_dir, csv_filename)
         
+        print(f"[DEBUG] CSV Generation - generate_questions flag: {generate_questions}")
+        print(f"[DEBUG] CSV Generation - csv_filename: {csv_filename}")
+        print(f"[DEBUG] CSV Generation - csv_path: {csv_path}")
+        print(f"[DEBUG] CSV Generation - output_dir: {output_dir}")
+        print(f"[DEBUG] CSV Generation - output_dir exists: {os.path.exists(output_dir)}")
+        if os.path.exists(output_dir):
+            print(f"[DEBUG] CSV Generation - output_dir contents: {os.listdir(output_dir)}")
+            images_dir_check = os.path.join(output_dir, 'images')
+            scenes_dir_check = os.path.join(output_dir, 'scenes')
+            print(f"[DEBUG] CSV Generation - images_dir exists: {os.path.exists(images_dir_check)}")
+            print(f"[DEBUG] CSV Generation - scenes_dir exists: {os.path.exists(scenes_dir_check)}")
+            if os.path.exists(images_dir_check):
+                image_files = [f for f in os.listdir(images_dir_check) if f.endswith('.png')]
+                print(f"[DEBUG] CSV Generation - number of image files: {len(image_files)}")
+                if len(image_files) > 0:
+                    print(f"[DEBUG] CSV Generation - sample image files: {image_files[:3]}")
+            if os.path.exists(scenes_dir_check):
+                scene_files = [f for f in os.listdir(scenes_dir_check) if f.endswith('.json')]
+                print(f"[DEBUG] CSV Generation - number of scene files: {len(scene_files)}")
+                if len(scene_files) > 0:
+                    print(f"[DEBUG] CSV Generation - sample scene files: {scene_files[:3]}")
+        
+        print(f"[DEBUG] CSV Generation - generate_mapping_with_questions is not None: {generate_mapping_with_questions is not None}")
+        
         try:
-            if generate_questions:
-                if 'generate_mapping_with_questions' in globals() and generate_mapping_with_questions:
-                    generate_mapping_with_questions(
-                        run_dir=output_dir,
-                        csv_filename=csv_filename,
-                        generate_questions=True,
-                        with_links=False
-                    )
-                    csv_created = os.path.exists(csv_path)
+            if generate_mapping_with_questions is not None:
+                print(f"[DEBUG] Calling generate_mapping_with_questions with:")
+                print(f"[DEBUG]   - run_dir: {output_dir}")
+                print(f"[DEBUG]   - csv_filename: {csv_filename}")
+                print(f"[DEBUG]   - generate_questions: {generate_questions}")
+                print(f"[DEBUG]   - with_links: False")
+                generate_mapping_with_questions(
+                    run_dir=output_dir,
+                    csv_filename=csv_filename,
+                    generate_questions=generate_questions,
+                    with_links=False
+                )
+                print(f"[DEBUG] generate_mapping_with_questions call completed")
+                csv_created = os.path.exists(csv_path)
+                print(f"[DEBUG] CSV file exists check: {csv_created}")
+                if csv_created:
+                    file_size = os.path.getsize(csv_path)
+                    print(f"[DEBUG] CSV file created successfully at: {csv_path}")
+                    print(f"[DEBUG] CSV file size: {file_size} bytes")
                 else:
-                    print("WARNING: generate_mapping_with_questions not available. CSV generation skipped.")
-                    csv_created = False
+                    print(f"[DEBUG] WARNING: CSV file was not created at expected path: {csv_path}")
+                    print(f"[DEBUG] Checking parent directory contents...")
+                    if os.path.exists(output_dir):
+                        all_files = os.listdir(output_dir)
+                        csv_files = [f for f in all_files if f.endswith('.csv')]
+                        print(f"[DEBUG] CSV files in output_dir: {csv_files}")
             else:
-                if 'generate_mapping_with_questions' in globals() and generate_mapping_with_questions:
-                    generate_mapping_with_questions(
-                        run_dir=output_dir,
-                        csv_filename=csv_filename,
-                        generate_questions=False,
-                        with_links=False
-                    )
-                    csv_created = os.path.exists(csv_path)
-                else:
-                    print("WARNING: generate_mapping_with_questions not available. CSV generation skipped.")
-                    csv_created = False
+                print(f"[DEBUG] WARNING: generate_mapping_with_questions is None. CSV generation skipped.")
+                csv_created = False
         except Exception as e:
-            print(f"WARNING: Failed to generate CSV: {e}")
+            print(f"[DEBUG] ERROR: Exception occurred during CSV generation: {e}")
+            import traceback
+            print(f"[DEBUG] Full traceback:")
+            traceback.print_exc()
             csv_created = False
         
         scene_files = list(Path(scenes_dir).glob("*.json")) if os.path.exists(scenes_dir) else []
@@ -464,6 +543,37 @@ def generate_counterfactual_scenes(num_scenes, num_objects, min_objects, max_obj
             'csv_created': csv_created,
             'csv_path': csv_path if csv_created else None
         }
+        
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        cwd = os.getcwd()
+        import shutil
+        import time
+        
+        temp_output_dir = os.path.join(cwd, 'temp_output')
+        if os.path.exists(temp_output_dir):
+            for attempt in range(3):
+                try:
+                    shutil.rmtree(temp_output_dir)
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        time.sleep(0.3)
+                    else:
+                        print(f"Warning: Could not remove temp_output after 3 attempts: {e}")
+        
+        render_patched_path = os.path.join(cwd, 'render_images_patched.py')
+        if os.path.exists(render_patched_path):
+            for attempt in range(3):
+                try:
+                    time.sleep(0.2)
+                    if os.path.exists(render_patched_path):
+                        os.remove(render_patched_path)
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        time.sleep(0.3)
+                    else:
+                        print(f"Warning: Could not remove render_images_patched.py after 3 attempts: {e}")
         
         if successful_scenes == 0 and error_messages:
             error_summary = "Scene generation failed. Common reasons:\n"
@@ -692,7 +802,10 @@ def main():
     with col1:
         st.header("Generate Counterfactual Images")
         
-        if st.button("Generate Counterfactual", use_container_width=True):
+        if st.button("Generate Counterfactual", use_container_width=True, key="generate_button"):
+            st.session_state.generation_complete = False
+            st.session_state.generating = True
+            
             if num_scenes < 1:
                 st.error("Please specify at least 1 scene to generate.")
                 return
@@ -713,6 +826,43 @@ def main():
             output_dir = os.path.join(base_dir, f"counterfactual_output_{timestamp}")
             os.makedirs(output_dir, exist_ok=True)
             st.session_state.output_dir = output_dir
+            
+            import shutil
+            import time
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            cwd = os.getcwd()
+            
+            temp_output_dir = os.path.join(cwd, 'temp_output')
+            if os.path.exists(temp_output_dir):
+                for attempt in range(3):
+                    try:
+                        shutil.rmtree(temp_output_dir)
+                        break
+                    except Exception as e:
+                        if attempt < 2:
+                            time.sleep(0.3)
+                        else:
+                            print(f"Warning: Could not remove temp_output after 3 attempts: {e}")
+            
+            render_patched_path = os.path.join(cwd, 'render_images_patched.py')
+            if os.path.exists(render_patched_path):
+                for attempt in range(3):
+                    try:
+                        time.sleep(0.2)
+                        if os.path.exists(render_patched_path):
+                            os.remove(render_patched_path)
+                        break
+                    except Exception as e:
+                        if attempt < 2:
+                            time.sleep(0.3)
+                        else:
+                            print(f"Warning: Could not remove render_images_patched.py after 3 attempts: {e}")
+            
+            try:
+                from pipeline import create_patched_render_script
+                create_patched_render_script()
+            except Exception as e:
+                st.warning(f"Could not create patched render script: {e}")
             
             params = {
                 'num_scenes': num_scenes,
@@ -803,11 +953,13 @@ def main():
                                "3. Install Blender and ensure it's in your system PATH")
                     
                     st.session_state.generation_complete = False
+                    st.session_state.generating = False
                     
             except Exception as e:
                 st.error(f"Error during generation: {str(e)}")
                 st.exception(e)
                 st.session_state.generation_complete = False
+                st.session_state.generating = False
                 progress_bar.progress(0)
                 status_text.text("Generation failed")
     
@@ -818,14 +970,81 @@ def main():
             output_dir = st.session_state.output_dir
             
             if os.path.exists(output_dir):
-                scene_files = list(Path(output_dir).rglob("*.json"))
-                image_files = list(Path(output_dir).rglob("*.png"))
+                images_dir = os.path.join(output_dir, 'images')
+                scenes_dir = os.path.join(output_dir, 'scenes')
+                
+                scene_files = list(Path(scenes_dir).glob("*.json")) if os.path.exists(scenes_dir) else []
+                image_files = list(Path(images_dir).glob("*.png")) if os.path.exists(images_dir) else []
                 csv_files = list(Path(output_dir).rglob("*.csv"))
                 
                 st.success(f"Generation Complete!")
                 st.metric("Scene Files", len(scene_files))
                 st.metric("CSV Files", len(csv_files))
                 st.metric("Image Files", len(image_files))
+                
+                if image_files:
+                    st.markdown("---")
+                    st.subheader("Generated Images")
+                    
+                    def get_counterfactual_type_from_scene(scene_file):
+                        try:
+                            with open(scene_file, 'r') as f:
+                                scene_data = json.load(f)
+                                cf_metadata = scene_data.get('cf_metadata', {})
+                                cf_type = cf_metadata.get('cf_type', '')
+                                if cf_type:
+                                    return cf_type.replace('_', ' ').title()
+                        except Exception as e:
+                            pass
+                        return "Counterfactual"
+                    
+                    scene_sets = {}
+                    for img_file in image_files:
+                        filename = img_file.name
+                        if filename.startswith('scene_'):
+                            parts = filename.replace('.png', '').split('_')
+                            if len(parts) >= 3:
+                                scene_num = parts[1]
+                                scene_type = parts[2]
+                                
+                                if scene_num not in scene_sets:
+                                    scene_sets[scene_num] = {}
+                                
+                                scene_sets[scene_num][scene_type] = {
+                                    'image_path': str(img_file),
+                                    'filename': filename
+                                }
+                    
+                    sorted_scenes = sorted(scene_sets.keys())[:3]
+                    
+                    for scene_idx, scene_num in enumerate(sorted_scenes):
+                        scene_data = scene_sets[scene_num]
+                        
+                        if 'original' not in scene_data:
+                            continue
+                        
+                        st.markdown(f"### Scene {scene_num}")
+                        
+                        cols = st.columns(3)
+                        
+                        with cols[0]:
+                            original = scene_data['original']
+                            st.image(original['image_path'], use_container_width=True, caption="Original")
+                        
+                        cf_count = 0
+                        for cf_key in ['cf1', 'cf2']:
+                            if cf_key in scene_data and cf_count < 2:
+                                cf_data = scene_data[cf_key]
+                                cf_scene_file = os.path.join(scenes_dir, cf_data['filename'].replace('.png', '.json'))
+                                cf_type = get_counterfactual_type_from_scene(cf_scene_file) if os.path.exists(cf_scene_file) else f"Counterfactual {cf_count + 1}"
+                                
+                                with cols[cf_count + 1]:
+                                    st.image(cf_data['image_path'], use_container_width=True, caption=cf_type)
+                                
+                                cf_count += 1
+                        
+                        if scene_idx < len(sorted_scenes) - 1:
+                            st.markdown("---")
                 
                 st.markdown("---")
                 st.subheader("Download Output")

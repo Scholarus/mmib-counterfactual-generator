@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  streamlit-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: counterfactual-generator
+    ports:
+      - "8501:8501"
+    volumes:
+      # Mount data directory if needed
+      - ./data:/app/data:ro
+      # Mount output directory for persistence
+      - ./output:/app/output
+      # Mount temp output directory
+      - ./temp_output:/app/temp_output
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import streamlit; print('OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

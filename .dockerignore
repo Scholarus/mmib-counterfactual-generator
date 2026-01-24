@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Output directories (will be mounted as volumes)
+output/
+temp_output/
+
+# Documentation
+*.md
+README.md
+DOCKER.md
+
+# Docker files (don't need in image)
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Large data files - NOTE: We NEED these for Blender to work
+# *.blend
+# data/shapes/
+# data/materials/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -858,6 +858,8 @@ NEGATIVE_COUNTERFACTUALS = {
     'apply_chromatic_aberration': cf_apply_chromatic_aberration,
 }
 
+DEFAULT_NEGATIVE_CF_TYPES = [k for k in NEGATIVE_COUNTERFACTUALS if k != 'apply_fisheye']
+
 COUNTERFACTUAL_TYPES = {**IMAGE_COUNTERFACTUALS, **NEGATIVE_COUNTERFACTUALS}
 
 def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, min_change_score=1.0, max_cf_attempts=10, min_noise_level='light'):
@@ -988,7 +990,7 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, min_ch
             'change_attempts': change_attempts,
         })
         
-        neg_cf_type = random.choice(list(NEGATIVE_COUNTERFACTUALS.keys()))
+        neg_cf_type = random.choice(DEFAULT_NEGATIVE_CF_TYPES)
         neg_cf_func = NEGATIVE_COUNTERFACTUALS[neg_cf_type]
         cf_scene, cf_desc, change_score, change_attempts = generate_one_with_min_change(
             neg_cf_func,
@@ -1009,7 +1011,7 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, min_ch
         if remaining > 0:
             all_cf_types = list(COUNTERFACTUAL_TYPES.keys())
             used_types = {image_cf_type, neg_cf_type}
-            available = [t for t in all_cf_types if t not in used_types]
+            available = [t for t in all_cf_types if t not in used_types and t != 'apply_fisheye']
             
             extra_types = random.sample(available, min(remaining, len(available)))
             for cf_type in extra_types:
@@ -1035,7 +1037,7 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, min_ch
             cf_func = IMAGE_COUNTERFACTUALS[cf_type]
             cf_category = 'image_cf'
         else:
-            cf_type = random.choice(list(NEGATIVE_COUNTERFACTUALS.keys()))
+            cf_type = random.choice(DEFAULT_NEGATIVE_CF_TYPES)
             cf_func = NEGATIVE_COUNTERFACTUALS[cf_type]
             cf_category = 'negative_cf'
         

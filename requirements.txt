@@ -10,9 +10,3 @@ streamlit>=1.28.0
 torch>=2.0.0
 transformers>=4.35.0
 huggingface_hub>=0.16.4,<0.18
-
-# Additional dependencies for counterfactual generation
-# Note: Blender and its Python API (bpy) must be installed separately
-# as they are not available via pip. The scripts are designed to run
-# inside Blender's Python environment using:
-# blender --background --python <script.py> -- [arguments]

@@ -227,7 +227,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_objects', type=int, default=5,
                        help='Number of objects in base scene (default: 5)')
     parser.add_argument('--render', action='store_true',
-                       help='Render scenes to images after generation')
+                       help='Render scenes to images')
     parser.add_argument('--use_gpu', type=int, default=0,
                        help='Use GPU rendering (0 = CPU, 1 = GPU, default: 0)')
     

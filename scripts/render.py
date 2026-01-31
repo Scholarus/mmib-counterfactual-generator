@@ -370,11 +370,11 @@ BACKGROUND_COLORS = {
 
 LIGHTING_PRESETS = {
     'default': {'key': 1.0, 'fill': 0.5, 'back': 0.3},
-    'bright': {'key': 2.5, 'fill': 1.5, 'back': 1.0},
-    'dim': {'key': 0.2, 'fill': 0.1, 'back': 0.05},
-    'warm': {'key': 1.8, 'fill': 1.0, 'back': 0.5, 'color': (1.0, 0.85, 0.7)},
-    'cool': {'key': 1.2, 'fill': 0.7, 'back': 0.6, 'color': (0.7, 0.85, 1.0)},
-    'dramatic': {'key': 3.5, 'fill': 0.1, 'back': 0.05},
+    'bright': {'key': 4.0, 'fill': 2.2, 'back': 1.4},
+    'dim': {'key': 0.08, 'fill': 0.04, 'back': 0.02},
+    'warm': {'key': 2.8, 'fill': 1.4, 'back': 0.7, 'color': (1.0, 0.75, 0.5)},
+    'cool': {'key': 2.0, 'fill': 1.1, 'back': 0.9, 'color': (0.5, 0.75, 1.0)},
+    'dramatic': {'key': 5.5, 'fill': 0.05, 'back': 0.02},
 }
 
 def set_background_color(color_name):
@@ -470,7 +470,6 @@ def set_lighting(lighting_name):
   print(f"Set lighting to {lighting_name}")
 
 def render_from_json(args):
-  """Render a scene from a JSON file (alternative to random generation)"""
   if not INSIDE_BLENDER:
     print("ERROR: render_from_json must be run inside Blender")
     return
@@ -899,16 +898,15 @@ def compute_all_relationships(scene_struct, eps=0.2):
 
 
 def check_visibility(blender_objects, min_pixels_per_object):
-  """Visibility check disabled for Blender 4.x compatibility."""
+  """Visibility check disabled for compatibility (was causing scene gen to fail)."""
   return True
 
 
 def render_shadeless(blender_objects, path='flat.png'):
   """
   Render a version of the scene with shading disabled and unique materials
-  assigned to all objects, and return a set of all colors that should be in the
-  rendered image. The image itself is written to path. This is used to ensure
-  that all objects will be visible in the final rendered scene.
+  assigned to all objects. The image itself is written to path. This is used to ensure
+  that all objects will be visible in the final rendered scene (when check_visibility is enabled).
   """
   render_args = bpy.context.scene.render
 

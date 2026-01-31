@@ -227,11 +227,12 @@ def create_render_from_json_script():
     render_path = os.path.join(current_dir, 'scripts', 'render.py')
     return render_path
 
-def generate_base_scene(num_objects, blender_path, scene_idx):
+def generate_base_scene(num_objects, blender_path, scene_idx, temp_run_dir=None):
     cwd = os.getcwd()
     script_file = os.path.abspath(__file__)
     current_dir = os.path.dirname(script_file)
-    
+    temp_dir_to_clean = None
+
     possible_dirs = [
         current_dir,
         cwd,
@@ -240,7 +241,7 @@ def generate_base_scene(num_objects, blender_path, scene_idx):
         os.path.dirname(cwd),
         '/app',
     ]
-    
+
     data_dir = None
     for possible_dir in possible_dirs:
         if not possible_dir:
@@ -249,7 +250,7 @@ def generate_base_scene(num_objects, blender_path, scene_idx):
         if os.path.exists(test_data_dir) and os.path.exists(os.path.join(test_data_dir, 'base_scene.blend')):
             data_dir = test_data_dir
             break
-    
+
     if data_dir is None:
         print(f"  ERROR: Could not find data directory")
         print(f"  Searched in:")
@@ -269,142 +270,155 @@ def generate_base_scene(num_objects, blender_path, scene_idx):
         print(f"  Script file: {script_file}")
         print(f"  HOME: {os.environ.get('HOME', 'NOT SET')}")
         return None
-    
-    temp_images_dir = os.path.join(cwd, 'temp_output', 'images')
-    temp_scenes_dir = os.path.join(cwd, 'temp_output', 'scenes')
-    
+
+    if temp_run_dir is None:
+        temp_run_dir = os.path.join(cwd, 'temp_output', f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{scene_idx}")
+        temp_dir_to_clean = temp_run_dir
+    else:
+        temp_run_dir = os.path.join(cwd, 'temp_output', temp_run_dir) if not os.path.isabs(temp_run_dir) else temp_run_dir
+
+    temp_images_dir = os.path.join(temp_run_dir, 'images')
+    temp_scenes_dir = os.path.join(temp_run_dir, 'scenes')
+
     os.makedirs(temp_images_dir, exist_ok=True)
     os.makedirs(temp_scenes_dir, exist_ok=True)
-    
-    patched_script = create_patched_render_script()
-    
-    if blender_path == 'blender':
-        blender_path = find_blender()
-    
-    if not os.path.exists(blender_path) and blender_path != 'blender':
-        print(f"  ERROR: Blender path does not exist: {blender_path}")
-        return None
-    
-    base_scene = os.path.join(data_dir, 'base_scene.blend')
-    properties_json = os.path.join(data_dir, 'properties.json')
-    shape_dir = os.path.join(data_dir, 'shapes')
-    material_dir = os.path.join(data_dir, 'materials')
-    
-    base_scene = os.path.abspath(base_scene)
-    properties_json = os.path.abspath(properties_json)
-    shape_dir = os.path.abspath(shape_dir)
-    material_dir = os.path.abspath(material_dir)
-    temp_images_dir = os.path.abspath(temp_images_dir)
-    temp_scenes_dir = os.path.abspath(temp_scenes_dir)
-    
-    if not os.path.exists(base_scene):
-        print(f"  ERROR: Base scene file not found: {base_scene}")
-        print(f"  Data directory contents: {os.listdir(data_dir) if os.path.exists(data_dir) else 'N/A'}")
-        return None
-    if not os.path.exists(properties_json):
-        print(f"  ERROR: Properties JSON not found: {properties_json}")
-        return None
-    if not os.path.exists(shape_dir):
-        print(f"  ERROR: Shape directory not found: {shape_dir}")
-        if os.path.exists(data_dir):
-            print(f"  Data directory contents: {os.listdir(data_dir)}")
-        return None
-    if not os.path.exists(material_dir):
-        print(f"  ERROR: Material directory not found: {material_dir}")
-        return None
-    
-    env = os.environ.copy()
-    
-    cmd = [
-        blender_path, '--background', '-noaudio', '--python', patched_script, '--',
-        '--num_images', '1',
-        '--start_idx', str(scene_idx),
-        '--min_objects', str(num_objects),
-        '--max_objects', str(num_objects),
-        '--min_pixels_per_object', '50',
-        '--min_dist', '0.20',
-        '--margin', '0.2',
-        '--max_retries', '100',
-        '--output_image_dir', temp_images_dir,
-        '--output_scene_dir', temp_scenes_dir,
-        '--filename_prefix', f'SCENE_{scene_idx:04d}',
-        '--base_scene_blendfile', base_scene,
-        '--properties_json', properties_json,
-        '--shape_dir', shape_dir,
-        '--material_dir', material_dir,
-    ]
-    
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env, cwd=cwd)
-    
-    if result.returncode != 0:
-        print(f"ERROR: Blender returned code {result.returncode}")
-        print(f"  Blender path used: {blender_path}")
-        print(f"  Command: {' '.join(cmd[:3])}...")
-        if result.stderr:
-            print(f"  Error details (last 1000 chars): {result.stderr[-1000:]}")
-        if result.stdout:
-            error_lines = [line for line in result.stdout.split('\n') if 'error' in line.lower() or 'Error' in line or 'ERROR' in line or 'Traceback' in line]
-            if error_lines:
-                print(f"  Error lines from stdout: {error_lines[-10:]}")
-            print(f"  Full stdout (last 500 chars): {result.stdout[-500:]}")
-        return None
-    
-    if not os.path.exists(temp_scenes_dir):
-        print(f"ERROR: temp_output/scenes directory does not exist")
-        print(f"  Expected: {temp_scenes_dir}")
-        print(f"  Current directory: {cwd}")
-        print(f"  Temp output dir exists: {os.path.exists(os.path.join(cwd, 'temp_output'))}")
-        if os.path.exists(os.path.join(cwd, 'temp_output')):
-            print(f"  Contents: {os.listdir(os.path.join(cwd, 'temp_output'))}")
-        return None
-    
-    scene_file = os.path.join(temp_scenes_dir, f'SCENE_{scene_idx:04d}_new_{scene_idx:06d}.json')
-    if not os.path.exists(scene_file):
-        print(f"  Scene file not found at expected path: {scene_file}")
-        if os.path.exists(temp_scenes_dir):
-            scene_files = os.listdir(temp_scenes_dir)
-            print(f"  Available scene files ({len(scene_files)}): {scene_files[:10]}")
-            matching_files = [f for f in scene_files if f.startswith(f'SCENE_{scene_idx:04d}')]
-            print(f"  Files matching SCENE_{scene_idx:04d}: {matching_files}")
-            if matching_files:
-                scene_file = os.path.join(temp_scenes_dir, matching_files[0])
-                print(f"  Using: {scene_file}")
-            else:
-                print(f"ERROR: No matching scene file found for scene_idx {scene_idx}")
-                print(f"  Checked for files starting with: SCENE_{scene_idx:04d}")
-                return None
-        else:
-            print(f"ERROR: temp_output/scenes directory does not exist: {temp_scenes_dir}")
-            return None
-    
-    if not os.path.exists(scene_file):
-        print(f"ERROR: Scene file not found: {scene_file}")
-        return None
-    
+
     try:
-        with open(scene_file, 'r') as f:
-            scene = json.load(f)
-    except Exception as e:
-        print(f"ERROR: Failed to read scene file {scene_file}: {e}")
-        return None
-    
-    if 'objects' not in scene:
-        print(f"ERROR: Scene file missing 'objects' key. Scene keys: {list(scene.keys())}")
-        print(f"  Scene file contents (first 500 chars): {json.dumps(scene, indent=2)[:500]}")
-        return None
-    
-    if len(scene['objects']) == 0:
-        print(f"WARNING: Scene has 0 objects")
-        print(f"  This usually means Blender hit max_retries trying to place objects")
-        print(f"  Scene file contents (first 1000 chars): {json.dumps(scene, indent=2)[:1000]}")
-        if result and result.stdout:
-            retry_lines = [line for line in result.stdout.split('\n') if 'retry' in line.lower() or 'Retry' in line or 'attempt' in line.lower()]
-            if retry_lines:
-                print(f"  Retry-related output: {retry_lines[-5:]}")
-        return None
-    
-    print(f"  [OK] Generated scene with {len(scene['objects'])} objects")
-    return scene
+        patched_script = create_patched_render_script()
+
+        if blender_path == 'blender':
+            blender_path = find_blender()
+
+        if not os.path.exists(blender_path) and blender_path != 'blender':
+            print(f"  ERROR: Blender path does not exist: {blender_path}")
+            return None
+
+        base_scene = os.path.join(data_dir, 'base_scene.blend')
+        properties_json = os.path.join(data_dir, 'properties.json')
+        shape_dir = os.path.join(data_dir, 'shapes')
+        material_dir = os.path.join(data_dir, 'materials')
+
+        base_scene = os.path.abspath(base_scene)
+        properties_json = os.path.abspath(properties_json)
+        shape_dir = os.path.abspath(shape_dir)
+        material_dir = os.path.abspath(material_dir)
+        temp_images_dir = os.path.abspath(temp_images_dir)
+        temp_scenes_dir = os.path.abspath(temp_scenes_dir)
+
+        if not os.path.exists(base_scene):
+            print(f"  ERROR: Base scene file not found: {base_scene}")
+            print(f"  Data directory contents: {os.listdir(data_dir) if os.path.exists(data_dir) else 'N/A'}")
+            return None
+        if not os.path.exists(properties_json):
+            print(f"  ERROR: Properties JSON not found: {properties_json}")
+            return None
+        if not os.path.exists(shape_dir):
+            print(f"  ERROR: Shape directory not found: {shape_dir}")
+            if os.path.exists(data_dir):
+                print(f"  Data directory contents: {os.listdir(data_dir)}")
+            return None
+        if not os.path.exists(material_dir):
+            print(f"  ERROR: Material directory not found: {material_dir}")
+            return None
+
+        env = os.environ.copy()
+
+        cmd = [
+            blender_path, '--background', '-noaudio', '--python', patched_script, '--',
+            '--num_images', '1',
+            '--start_idx', str(scene_idx),
+            '--min_objects', str(num_objects),
+            '--max_objects', str(num_objects),
+            '--min_pixels_per_object', '50',
+            '--min_dist', '0.20',
+            '--margin', '0.2',
+            '--max_retries', '100',
+            '--output_image_dir', temp_images_dir,
+            '--output_scene_dir', temp_scenes_dir,
+            '--filename_prefix', f'SCENE_{scene_idx:04d}',
+            '--base_scene_blendfile', base_scene,
+            '--properties_json', properties_json,
+            '--shape_dir', shape_dir,
+            '--material_dir', material_dir,
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env, cwd=cwd)
+
+        if result.returncode != 0:
+            print(f"ERROR: Blender returned code {result.returncode}")
+            print(f"  Blender path used: {blender_path}")
+            print(f"  Command: {' '.join(cmd[:3])}...")
+            if result.stderr:
+                print(f"  Error details (last 1000 chars): {result.stderr[-1000:]}")
+            if result.stdout:
+                error_lines = [line for line in result.stdout.split('\n') if 'error' in line.lower() or 'Error' in line or 'ERROR' in line or 'Traceback' in line]
+                if error_lines:
+                    print(f"  Error lines from stdout: {error_lines[-10:]}")
+                print(f"  Full stdout (last 500 chars): {result.stdout[-500:]}")
+            return None
+
+        if not os.path.exists(temp_scenes_dir):
+            print(f"ERROR: temp run scenes directory does not exist")
+            print(f"  Expected: {temp_scenes_dir}")
+            print(f"  Current directory: {cwd}")
+            print(f"  Temp run dir exists: {os.path.exists(temp_run_dir)}")
+            if os.path.exists(temp_run_dir):
+                print(f"  Contents: {os.listdir(temp_run_dir)}")
+            return None
+
+        scene_file = os.path.join(temp_scenes_dir, f'SCENE_{scene_idx:04d}_new_{scene_idx:06d}.json')
+        if not os.path.exists(scene_file):
+            print(f"  Scene file not found at expected path: {scene_file}")
+            if os.path.exists(temp_scenes_dir):
+                scene_files = os.listdir(temp_scenes_dir)
+                print(f"  Available scene files ({len(scene_files)}): {scene_files[:10]}")
+                matching_files = [f for f in scene_files if f.startswith(f'SCENE_{scene_idx:04d}')]
+                print(f"  Files matching SCENE_{scene_idx:04d}: {matching_files}")
+                if matching_files:
+                    scene_file = os.path.join(temp_scenes_dir, matching_files[0])
+                    print(f"  Using: {scene_file}")
+                else:
+                    print(f"ERROR: No matching scene file found for scene_idx {scene_idx}")
+                    print(f"  Checked for files starting with: SCENE_{scene_idx:04d}")
+                    return None
+            else:
+                print(f"ERROR: temp run scenes directory does not exist: {temp_scenes_dir}")
+                return None
+
+        if not os.path.exists(scene_file):
+            print(f"ERROR: Scene file not found: {scene_file}")
+            return None
+
+        try:
+            with open(scene_file, 'r') as f:
+                scene = json.load(f)
+        except Exception as e:
+            print(f"ERROR: Failed to read scene file {scene_file}: {e}")
+            return None
+
+        if 'objects' not in scene:
+            print(f"ERROR: Scene file missing 'objects' key. Scene keys: {list(scene.keys())}")
+            print(f"  Scene file contents (first 500 chars): {json.dumps(scene, indent=2)[:500]}")
+            return None
+
+        if len(scene['objects']) == 0:
+            print(f"WARNING: Scene has 0 objects")
+            print(f"  This usually means Blender hit max_retries trying to place objects")
+            print(f"  Scene file contents (first 1000 chars): {json.dumps(scene, indent=2)[:1000]}")
+            if result and result.stdout:
+                retry_lines = [line for line in result.stdout.split('\n') if 'retry' in line.lower() or 'Retry' in line or 'attempt' in line.lower()]
+                if retry_lines:
+                    print(f"  Retry-related output: {retry_lines[-5:]}")
+            return None
+
+        print(f"  [OK] Generated scene with {len(scene['objects'])} objects")
+        return scene
+    finally:
+        if temp_dir_to_clean and os.path.exists(temp_dir_to_clean):
+            try:
+                shutil.rmtree(temp_dir_to_clean)
+            except Exception:
+                pass
 
 def cf_change_color(scene):
     cf_scene = copy.deepcopy(scene)
@@ -862,7 +876,7 @@ DEFAULT_NEGATIVE_CF_TYPES = [k for k in NEGATIVE_COUNTERFACTUALS if k != 'apply_
 
 COUNTERFACTUAL_TYPES = {**IMAGE_COUNTERFACTUALS, **NEGATIVE_COUNTERFACTUALS}
 
-def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, min_change_score=1.0, max_cf_attempts=10, min_noise_level='light'):
+def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, same_cf_type=False, min_change_score=1.0, max_cf_attempts=10, min_noise_level='light'):
     counterfactuals = []
 
     def compute_change_score(original_scene, cf_scene):
@@ -944,11 +958,16 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, min_ch
                 break
         return best_scene, best_desc, best_score, attempts
     
-    # If specific types requested
-    if cf_types:
-        # Deterministic: follow the order provided on the command line; cycle if needed.
+    selected_types = None
+    if same_cf_type and cf_types:
+        selected_types = [cf_types[0]] * num_counterfactuals
+    elif same_cf_type and not cf_types:
+        one_type = random.choice(list(COUNTERFACTUAL_TYPES.keys()))
+        selected_types = [one_type] * num_counterfactuals
+    elif cf_types:
         selected_types = (cf_types * ((num_counterfactuals // len(cf_types)) + 1))[:num_counterfactuals]
-        
+
+    if selected_types is not None:
         for cf_type in selected_types:
             if cf_type not in COUNTERFACTUAL_TYPES:
                 print(f"WARNING: Unknown CF type '{cf_type}', skipping")
@@ -1573,7 +1592,7 @@ def main():
     parser.add_argument('--skip_render', action='store_true',
                        help='Only generate scenes, skip rendering')
     parser.add_argument('--render_only', action='store_true',
-                       help='Only render existing scene JSON files (no generation). Requires --run_dir, --run_name, or --auto_latest')
+                       help='Only render existing scene JSON files. Requires --run_dir, --run_name, or --auto_latest')
     parser.add_argument('--run_dir', type=str, default=None,
                        help='Run directory containing scenes/ folder (for --render_only mode)')
     parser.add_argument('--auto_latest', action='store_true',
@@ -1591,6 +1610,8 @@ def main():
                        'apply_fisheye', 'apply_blur', 'apply_vignette', 'apply_chromatic_aberration'
                    ],
                    help='Specific counterfactual types to use (if not specified, uses default: 1 image CF + 1 negative CF)')
+    parser.add_argument('--same_cf_type', action='store_true',
+                   help='Use the same counterfactual type for all variants (first in --cf_types, or one random type if --cf_types not set)')
     parser.add_argument('--min_cf_change_score', type=float, default=1.0,
                    help='Minimum heuristic change score for a counterfactual to be accepted (retries until met). Increase for more noticeable CFs.')
     parser.add_argument('--max_cf_attempts', type=int, default=10,
@@ -1602,25 +1623,21 @@ def main():
     parser.add_argument('--list_cf_types', action='store_true',
                    help='List all available counterfactual types and exit')
     
-    # Question generation arguments
     parser.add_argument('--generate_questions', action='store_true',
-                       help='Generate questions and answers CSV after rendering completes')
+                       help='Create questions and answers CSV after rendering completes')
     parser.add_argument('--csv_name', default='image_mapping_with_questions.csv',
-                       help='Output CSV filename for question generation (default: image_mapping_with_questions.csv)')
+                       help='Output CSV filename (default: image_mapping_with_questions.csv)')
     
     args = parser.parse_args()
 
-    # List CF types and exit early (before any other validation/work)
     if args.list_cf_types:
         list_counterfactual_types()
         return
     
-    # Handle render_only mode
     if args.render_only:
         render_existing_scenes(args)
         return
     
-    # Validate resume
     if args.resume and not args.run_name:
         print("ERROR: --run_name is required when using --resume")
         return
@@ -1629,18 +1646,14 @@ def main():
     blender_path = args.blender_path or find_blender()
     print(f"Using Blender: {blender_path}")
     
-    # Create patched files once
     print("\nPreparing scripts...")
     create_patched_render_script()
-    # Note: utils functions are now merged into render.py, so no separate utils_patched needed
-    
-    # Create run directory
     run_dir = create_run_directory(args.output_dir, args.run_name)
+    temp_run_id = os.path.basename(run_dir)
     print(f"\n{'='*70}")
     print(f"RUN DIRECTORY: {run_dir}")
     print(f"{'='*70}")
-    
-    # Create output directories inside run folder
+
     scenes_dir = os.path.join(run_dir, 'scenes')
     images_dir = os.path.join(run_dir, 'images')
     os.makedirs(scenes_dir, exist_ok=True)
@@ -1695,7 +1708,7 @@ def main():
         
         base_scene = None
         for retry in range(3):
-            base_scene = generate_base_scene(num_objects, blender_path, i)
+            base_scene = generate_base_scene(num_objects, blender_path, i, temp_run_dir=temp_run_id)
             if base_scene and len(base_scene['objects']) > 0:
                 break
             print(f"  Retry {retry + 1}/3...")
@@ -1711,6 +1724,7 @@ def main():
             base_scene,
             args.num_counterfactuals,
             cf_types=args.cf_types,
+            same_cf_type=args.same_cf_type,
             min_change_score=args.min_cf_change_score,
             max_cf_attempts=args.max_cf_attempts,
             min_noise_level=args.min_noise_level
@@ -1781,8 +1795,9 @@ def main():
     
     archive_path = create_downloadable_archive(run_dir)
     
-    if os.path.exists('temp_output'):
-        shutil.rmtree('temp_output')
+    temp_run_path = os.path.join(os.getcwd(), 'temp_output', temp_run_id)
+    if os.path.exists(temp_run_path):
+        shutil.rmtree(temp_run_path)
     if os.path.exists('render_images_patched.py'):
         os.remove('render_images_patched.py')
     
@@ -1814,13 +1829,12 @@ def main():
     if args.resume and completed_scenes:
         print(f"\n[OK] Resume successful! Completed {len(completed_scenes)}/{args.num_scenes} scenes total")
     
-    # Generate questions if requested
     if args.generate_questions and not args.skip_render:
         if generate_mapping_with_questions is None:
-            print("\n[WARNING] Question generation module not found. Skipping question generation.")
+            print("\n[WARNING] Questions module not found. Skipping.")
         else:
             print("\n" + "="*70)
-            print("GENERATING QUESTIONS AND ANSWERS")
+            print("QUESTIONS AND ANSWERS")
             print("="*70)
             try:
                 generate_mapping_with_questions(
@@ -1828,9 +1842,9 @@ def main():
                     args.csv_name,
                     generate_questions=True
                 )
-                print(f"\n[OK] Question generation complete! CSV saved to: {os.path.join(run_dir, args.csv_name)}")
+                print(f"\n[OK] CSV saved to: {os.path.join(run_dir, args.csv_name)}")
             except Exception as e:
-                print(f"\n[ERROR] Error generating questions: {e}")
+                print(f"\n[ERROR] Questions: {e}")
                 import traceback
                 traceback.print_exc()
 

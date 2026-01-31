@@ -43,7 +43,7 @@ python scripts/generate_examples.py --render [--output_dir DIR] [--num_objects N
 **Options:**
 - `--output_dir`: Output directory (default: `output/counterfactual_examples`)
 - `--num_objects`: Number of objects in base scene (default: 5)
-- `--render`: Render scenes to PNG images after generation
+- `--render`: Render scenes to PNG images
 - `--use_gpu`: Use GPU rendering (0 = CPU, 1 = GPU, default: 0)
 
 **Output**: 

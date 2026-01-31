@@ -1,5 +1,5 @@
 ---
-title: MMB Counterfactual Image Generation Tool
+title: MMB Counterfactual Image Tool
 colorFrom: blue
 colorTo: indigo
 sdk: docker
@@ -8,26 +8,26 @@ license: mit
 arxiv: 2401.xxxxx
 ---
 
-A Python-based pipeline for generating CLEVR-style scenes with counterfactual variants and rendering them using Blender. This project supports generating diverse scene sets with configurable object counts, counterfactual variations, and automated question generation.
+A Python-based pipeline for CLEVR-style scenes with counterfactual variants and Blender rendering. Configurable object counts, counterfactual types, and automated questions and answers.
 
 **Key Features:**
 - 17 different counterfactual types (9 image CFs + 8 negative CFs)
 - Automated Blender rendering with GPU support
-- Question-answer dataset generation
+- Question-answer datasets
 - Resume support for interrupted jobs
 - Streamlit web interface
-- Example generation for all counterfactual types
+- Examples for all counterfactual types
 
 ## Hugging Face Spaces Deployment
 
-This app is configured to run on Hugging Face Spaces using Docker. The Dockerfile includes Blender installation and all necessary dependencies for scene generation and rendering.
+This app is configured to run on Hugging Face Spaces using Docker. The Dockerfile includes Blender installation and all necessary dependencies for scenes and rendering.
 
 ## Features
 
-- **Scene Generation**: Generate multiple scene sets with configurable object counts and properties
+- **Scenes**: Multiple scene sets with configurable object counts and properties
 - **Counterfactual Variants**: Create multiple counterfactual variations per scene (color, shape, material, size changes)
 - **Blender Rendering**: Automated rendering of scenes to PNG images using Blender's Cycles engine
-- **Question Generation**: Generate counterfactual questions and answers for generated scenes
+- **Questions**: Counterfactual questions and answers for each scene set
 - **Resume Support**: Resume interrupted rendering jobs
 
 ## Requirements
@@ -90,7 +90,7 @@ streamlit run app.py
 
 The web interface provides:
 - Interactive parameter configuration
-- Real-time generation progress
+- Real-time progress
 - Visual output preview
 - Downloadable results as ZIP files
 
@@ -149,13 +149,14 @@ This allows you to:
 | `--width`                 | 320           | Image width in pixels                                                        |
 | `--height`                | 240           | Image height in pixels                                                       |
 | `--skip_render`           | False         | Generate scenes only (JSON only, no PNG rendering)                           |
-| `--render_only`           | False         | Only render existing scene JSON files (no generation). Requires --run_dir, --run_name, or --auto_latest |
+| `--render_only`           | False         | Only render existing scene JSON files. Requires --run_dir, --run_name, or --auto_latest |
 | `--run_dir`               | None          | Run directory containing scenes/ folder (for --render_only mode)             |
 | `--auto_latest`           | False         | Automatically use the latest run in output_dir (for --render_only mode)      |
 | `--resume`                | False         | Resume from where it stopped in an existing run                              |
 | `--cf_types`              | None          | Explicitly choose which counterfactual types are used (order is respected; cycles if needed) |
+| `--same_cf_type`          | False         | Use the same counterfactual type for all variants (first in `--cf_types`, or one random if unset) |
 | `--list_cf_types`         | False         | Print available counterfactual types and exit                                |
-| `--min_cf_change_score`   | 1.0           | Minimum heuristic change score (retries CF generation until it’s “noticeable” enough) |
+| `--min_cf_change_score`   | 1.0           | Minimum heuristic change score (retries CF until it’s “noticeable” enough) |
 | `--max_cf_attempts`       | 10            | Max retries per counterfactual to reach `--min_cf_change_score`               |
 
 #### Examples
@@ -178,6 +179,8 @@ python3 pipeline.py --list_cf_types
 
 # Force specific counterfactual types in order (CF1 then CF2)
 python3 pipeline.py --num_scenes 10 --num_counterfactuals 2 --cf_types change_color add_noise
+# All counterfactuals same type (e.g. both change_color):
+python3 pipeline.py --num_scenes 10 --num_counterfactuals 2 --cf_types change_color --same_cf_type
 
 # Make counterfactuals more noticeable (stricter threshold + more retries)
 python3 pipeline.py --num_scenes 10 --min_cf_change_score 1.5 --max_cf_attempts 25
@@ -284,7 +287,7 @@ python scripts/generate_questions_mapping.py --output_dir output --auto_latest -
 
 ```
 .
-├── pipeline.py                     # Main pipeline: generation + rendering (supports --render_only)
+├── pipeline.py                     # Main pipeline and rendering (supports --render_only)
 ├── app.py                         # Streamlit web interface
 ├── requirements.txt                # Python dependencies
 ├── data/                           # Scene assets
@@ -306,7 +309,7 @@ python scripts/generate_questions_mapping.py --output_dir output --auto_latest -
 
 **Note**: The pipeline dynamically generates temporary files during execution:
 - `render_images_patched.py` - Patched rendering script
-- `temp_output/` - Temporary output directory
+- `temp_output/<run_id>/` - Temporary output per run (e.g. `temp_output/2025-01-29_12-30-45/images` and `.../scenes`), so different runs use separate directories and do not overwrite each other.
 
 These files are automatically created when needed, cleaned up after use, and are ignored by git.
 ```

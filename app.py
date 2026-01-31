@@ -30,25 +30,15 @@ try:
         import sys
         script_dir = os.path.dirname(os.path.abspath(__file__))
         scripts_path = os.path.join(script_dir, 'scripts')
-        print(f"[DEBUG] Script directory: {script_dir}")
-        print(f"[DEBUG] Scripts path: {scripts_path}")
-        print(f"[DEBUG] Scripts path exists: {os.path.exists(scripts_path)}")
         if scripts_path not in sys.path:
             sys.path.insert(0, scripts_path)
-            print(f"[DEBUG] Added scripts_path to sys.path: {scripts_path}")
-        print(f"[DEBUG] Attempting to import from generate_questions_mapping...")
         from generate_questions_mapping import (
             load_scene,
             generate_question_for_scene as _generate_question_for_scene_file,
             answer_question_for_scene,
             generate_mapping_with_questions
         )
-        print(f"[DEBUG] Successfully imported question generation functions")
-        print(f"[DEBUG] generate_mapping_with_questions is not None: {generate_mapping_with_questions is not None}")
-    except ImportError as e:
-        print(f"[DEBUG] Warning: Could not import question generation functions: {e}")
-        import traceback
-        traceback.print_exc()
+    except ImportError:
         def load_scene(scene_file):
             with open(scene_file, 'r') as f:
                 return json.load(f)
@@ -57,7 +47,6 @@ try:
             return len(objects)
         _generate_question_for_scene_file = None
         generate_mapping_with_questions = None
-        print(f"[DEBUG] Set generate_mapping_with_questions to None")
     PIPELINE_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: Error importing pipeline functions: {e}")
@@ -104,7 +93,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 def create_zip_file(output_dir, zip_path):
-    """Create a zip file from the output directory"""
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, dirs, files in os.walk(output_dir):
             for file in files:
@@ -113,11 +101,7 @@ def create_zip_file(output_dir, zip_path):
                 zipf.write(file_path, arcname)
 
 
-def generate_synthetic_scene(num_objects, scene_idx):
-    """
-    Generate a synthetic scene JSON without Blender.
-    Creates a scene with random objects positioned in 3D space.
-    """
+def generate_fallback_scene(num_objects, scene_idx):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     props_path = os.path.join(script_dir, 'data', 'properties.json')
     
@@ -141,7 +125,7 @@ def generate_synthetic_scene(num_objects, scene_idx):
     
     scene_num = scene_idx + 1
     scene = {
-        'split': 'synthetic',
+        'split': 'fallback',
         'image_index': scene_num,
         'image_filename': f'scene_{scene_num:04d}_original.png',
         'objects': [],
@@ -239,7 +223,7 @@ def generate_question_for_scene_dict(scene):
 
 
 def generate_counterfactual_scenes(num_scenes, num_objects, min_objects, max_objects, num_counterfactuals, 
-                                    cf_types, min_change_score, max_cf_attempts, min_noise_level,
+                                    cf_types, same_cf_type, min_change_score, max_cf_attempts, min_noise_level,
                                     output_dir, blender_path=None, use_gpu=0, samples=512, 
                                     width=320, height=240, skip_render=False, generate_questions=False):
     """
@@ -367,15 +351,15 @@ def generate_counterfactual_scenes(num_scenes, num_objects, min_objects, max_obj
                             blender_available = False
                             continue
             else:
-                print(f"Generating synthetic scene {scene_idx + 1} (Blender not available)...")
-                base_scene = generate_synthetic_scene(scene_num_objects, scene_idx)
+                print(f"Scene {scene_idx + 1} (Blender not available)...")
+                base_scene = generate_fallback_scene(scene_num_objects, scene_idx)
             
             if not base_scene or len(base_scene.get('objects', [])) == 0:
                 error_detail = f"Scene {scene_idx + 1}: Failed to generate"
                 if blender_available:
                     error_detail += f" (Blender was available at {blender_path} but returned empty scene)"
                 else:
-                    error_detail += f" (Blender not available, synthetic generation also failed)"
+                    error_detail += " (Blender not available, fallback scene also failed)"
                 print(f"Failed to generate scene {scene_idx + 1}")
                 print(f"  Blender available: {blender_available}")
                 print(f"  Blender path: {blender_path}")
@@ -391,6 +375,7 @@ def generate_counterfactual_scenes(num_scenes, num_objects, min_objects, max_obj
                 base_scene,
                 num_counterfactuals=num_counterfactuals,
                 cf_types=cf_types,
+                same_cf_type=same_cf_type,
                 min_change_score=min_change_score,
                 max_cf_attempts=max_cf_attempts,
                 min_noise_level='light'
@@ -469,64 +454,19 @@ def generate_counterfactual_scenes(num_scenes, num_objects, min_objects, max_obj
         csv_filename = 'image_mapping_with_questions.csv' if generate_questions else 'image_mapping.csv'
         csv_path = os.path.join(output_dir, csv_filename)
         
-        print(f"[DEBUG] CSV Generation - generate_questions flag: {generate_questions}")
-        print(f"[DEBUG] CSV Generation - csv_filename: {csv_filename}")
-        print(f"[DEBUG] CSV Generation - csv_path: {csv_path}")
-        print(f"[DEBUG] CSV Generation - output_dir: {output_dir}")
-        print(f"[DEBUG] CSV Generation - output_dir exists: {os.path.exists(output_dir)}")
-        if os.path.exists(output_dir):
-            print(f"[DEBUG] CSV Generation - output_dir contents: {os.listdir(output_dir)}")
-            images_dir_check = os.path.join(output_dir, 'images')
-            scenes_dir_check = os.path.join(output_dir, 'scenes')
-            print(f"[DEBUG] CSV Generation - images_dir exists: {os.path.exists(images_dir_check)}")
-            print(f"[DEBUG] CSV Generation - scenes_dir exists: {os.path.exists(scenes_dir_check)}")
-            if os.path.exists(images_dir_check):
-                image_files = [f for f in os.listdir(images_dir_check) if f.endswith('.png')]
-                print(f"[DEBUG] CSV Generation - number of image files: {len(image_files)}")
-                if len(image_files) > 0:
-                    print(f"[DEBUG] CSV Generation - sample image files: {image_files[:3]}")
-            if os.path.exists(scenes_dir_check):
-                scene_files = [f for f in os.listdir(scenes_dir_check) if f.endswith('.json')]
-                print(f"[DEBUG] CSV Generation - number of scene files: {len(scene_files)}")
-                if len(scene_files) > 0:
-                    print(f"[DEBUG] CSV Generation - sample scene files: {scene_files[:3]}")
-        
-        print(f"[DEBUG] CSV Generation - generate_mapping_with_questions is not None: {generate_mapping_with_questions is not None}")
-        
         try:
             if generate_mapping_with_questions is not None:
-                print(f"[DEBUG] Calling generate_mapping_with_questions with:")
-                print(f"[DEBUG]   - run_dir: {output_dir}")
-                print(f"[DEBUG]   - csv_filename: {csv_filename}")
-                print(f"[DEBUG]   - generate_questions: {generate_questions}")
-                print(f"[DEBUG]   - with_links: False")
                 generate_mapping_with_questions(
                     run_dir=output_dir,
                     csv_filename=csv_filename,
                     generate_questions=generate_questions,
                     with_links=False
                 )
-                print(f"[DEBUG] generate_mapping_with_questions call completed")
                 csv_created = os.path.exists(csv_path)
-                print(f"[DEBUG] CSV file exists check: {csv_created}")
-                if csv_created:
-                    file_size = os.path.getsize(csv_path)
-                    print(f"[DEBUG] CSV file created successfully at: {csv_path}")
-                    print(f"[DEBUG] CSV file size: {file_size} bytes")
-                else:
-                    print(f"[DEBUG] WARNING: CSV file was not created at expected path: {csv_path}")
-                    print(f"[DEBUG] Checking parent directory contents...")
-                    if os.path.exists(output_dir):
-                        all_files = os.listdir(output_dir)
-                        csv_files = [f for f in all_files if f.endswith('.csv')]
-                        print(f"[DEBUG] CSV files in output_dir: {csv_files}")
             else:
-                print(f"[DEBUG] WARNING: generate_mapping_with_questions is None. CSV generation skipped.")
                 csv_created = False
-        except Exception as e:
-            print(f"[DEBUG] ERROR: Exception occurred during CSV generation: {e}")
+        except Exception:
             import traceback
-            print(f"[DEBUG] Full traceback:")
             traceback.print_exc()
             csv_created = False
         
@@ -576,7 +516,7 @@ def generate_counterfactual_scenes(num_scenes, num_objects, min_objects, max_obj
                         print(f"Warning: Could not remove render_images_patched.py after 3 attempts: {e}")
         
         if successful_scenes == 0 and error_messages:
-            error_summary = "Scene generation failed. Common reasons:\n"
+            error_summary = "Scenes failed. Common reasons:\n"
             error_summary += "- Blender is not installed or not in PATH\n"
             error_summary += "- Blender executable not found\n"
             error_summary += f"\nFirst error: {error_messages[0] if error_messages else 'Unknown error'}"
@@ -599,7 +539,7 @@ def generate_counterfactual_scenes(num_scenes, num_objects, min_objects, max_obj
     
     except Exception as e:
         import traceback
-        error_msg = f"Generation error: {str(e)}\n{traceback.format_exc()}"
+        error_msg = f"Error: {str(e)}\n{traceback.format_exc()}"
         print(error_msg)
         return {
             'success': False,
@@ -673,7 +613,11 @@ def main():
         
         st.markdown("**Counterfactual Types**")
         st.caption("Leave all unchecked to use default behavior (1 Image CF + 1 Negative CF)")
-        
+        same_cf_type = st.checkbox(
+            "Same CF type for all",
+            value=False,
+            help="Use the same counterfactual type for every variant (first selected type, or one random if none selected)"
+        )
         with st.expander("Image CFs (change answers)", expanded=False):
             use_change_color = st.checkbox("Change Color", value=False)
             use_change_shape = st.checkbox("Change Shape", value=False)
@@ -869,6 +813,7 @@ def main():
                 'num_objects': num_objects,
                 'num_counterfactuals': num_counterfactuals,
                 'cf_types': cf_types if cf_types else None,
+                'same_cf_type': same_cf_type,
                 'min_change_score': min_change_score,
                 'max_cf_attempts': max_cf_attempts,
                 'width': image_width,
@@ -900,6 +845,7 @@ def main():
                     max_objects=max_objects,
                     num_counterfactuals=num_counterfactuals,
                     cf_types=cf_types,
+                    same_cf_type=same_cf_type,
                     min_change_score=min_change_score,
                     max_cf_attempts=max_cf_attempts,
                     min_noise_level=min_noise_level,
@@ -913,13 +859,13 @@ def main():
                 )
                 
                 progress_bar.progress(80)
-                status_text.text("Generation complete! Preparing output...")
+                status_text.text("Preparing output...")
                 
                 if result and result.get('success', False):
                     num_scenes_generated = result.get('num_scenes', 0)
                     
                     if num_scenes_generated == 0:
-                        st.warning("No scenes were generated. This is likely because Blender is required for scene generation and is not available in this environment.")
+                        st.warning("No scenes were created. Blender is required and is not available in this environment.")
                         st.info("**To use this application:**\n"
                                "1. Run it locally with Blender installed\n"
                                "2. Use the command-line `pipeline.py` script\n"
@@ -928,7 +874,7 @@ def main():
                     else:
                         st.session_state.generation_complete = True
                         progress_bar.progress(100)
-                        status_text.text("Generation successful!")
+                        status_text.text("Done.")
                         
                         st.success(f"Successfully generated {num_scenes_generated} scene sets!")
                         st.info(f"Output directory: {output_dir}")
@@ -942,7 +888,7 @@ def main():
                         stats = result['statistics']
                         st.json(stats)
                 else:
-                    error_msg = result.get('error', 'Unknown error occurred') if result else 'Generation failed'
+                    error_msg = result.get('error', 'Unknown error occurred') if result else 'Failed'
                     st.error(f"Generation failed: {error_msg}")
                     
                     if 'blender' in error_msg.lower() or 'Blender' in error_msg or result.get('num_scenes', 0) == 0:
@@ -961,7 +907,7 @@ def main():
                 st.session_state.generation_complete = False
                 st.session_state.generating = False
                 progress_bar.progress(0)
-                status_text.text("Generation failed")
+                status_text.text("Failed")
     
     with col2:
         st.header("Output")
@@ -977,7 +923,7 @@ def main():
                 image_files = list(Path(images_dir).glob("*.png")) if os.path.exists(images_dir) else []
                 csv_files = list(Path(output_dir).rglob("*.csv"))
                 
-                st.success(f"Generation Complete!")
+                st.success("Complete!")
                 st.metric("Scene Files", len(scene_files))
                 st.metric("CSV Files", len(csv_files))
                 st.metric("Image Files", len(image_files))
@@ -1093,7 +1039,7 @@ def main():
     st.markdown("---")
     st.markdown(
         "<div style='text-align: center; color: #666; padding: 1rem;'>"
-        "Counterfactual Image Generation Tool | Built with Streamlit"
+        "Counterfactual Image Tool | Built with Streamlit"
         "</div>",
         unsafe_allow_html=True
     )

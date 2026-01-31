@@ -60,6 +60,8 @@ def main():
                        'apply_fisheye', 'apply_blur', 'apply_vignette', 'apply_chromatic_aberration'
                    ],
                    help='Specific counterfactual types to use')
+    parser.add_argument('--same_cf_type', action='store_true',
+                   help='Use the same counterfactual type for all variants')
     parser.add_argument('--min_cf_change_score', type=float, default=1.0,
                    help='Minimum heuristic change score for counterfactuals')
     parser.add_argument('--max_cf_attempts', type=int, default=10,
@@ -87,10 +89,11 @@ def main():
     create_patched_render_script()
     
     run_dir = create_run_directory(args.output_dir, args.run_name)
+    temp_run_id = os.path.basename(run_dir)
     print(f"\n{'='*70}")
     print(f"RUN DIRECTORY: {run_dir}")
     print(f"{'='*70}")
-    
+
     scenes_dir = os.path.join(run_dir, 'scenes')
     os.makedirs(scenes_dir, exist_ok=True)
     
@@ -131,7 +134,7 @@ def main():
         
         base_scene = None
         for retry in range(3):
-            base_scene = generate_base_scene(num_objects, blender_path, i)
+            base_scene = generate_base_scene(num_objects, blender_path, i, temp_run_dir=temp_run_id)
             if base_scene and len(base_scene['objects']) > 0:
                 break
             print(f"  Retry {retry + 1}/3...")
@@ -147,6 +150,7 @@ def main():
             base_scene,
             args.num_counterfactuals,
             cf_types=args.cf_types,
+            same_cf_type=args.same_cf_type,
             min_change_score=args.min_cf_change_score,
             max_cf_attempts=args.max_cf_attempts,
             min_noise_level=args.min_noise_level
@@ -207,13 +211,14 @@ def main():
     with open(metadata_path, 'w') as f:
         json.dump(metadata, f, indent=2)
     
-    if os.path.exists('temp_output'):
-        shutil.rmtree('temp_output')
+    temp_run_path = os.path.join(os.getcwd(), 'temp_output', temp_run_id)
+    if os.path.exists(temp_run_path):
+        shutil.rmtree(temp_run_path)
     if os.path.exists('render_images_patched.py'):
         os.remove('render_images_patched.py')
     
     print("\n" + "="*70)
-    print("SCENE GENERATION COMPLETE")
+    print("SCENE COMPLETE")
     print("="*70)
     print(f"Run directory: {run_dir}")
     print(f"Successfully generated: {successful_scenes}/{args.num_scenes} scene sets")

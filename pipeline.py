@@ -1030,7 +1030,9 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, same_c
             pool = [t for t in cf_types if t in IMAGE_COUNTERFACTUALS] or cf_types
         elif negative_only:
             pool = [t for t in cf_types if t in NEGATIVE_COUNTERFACTUALS] or cf_types
-        selected_types = [random.choice(pool) for _ in range(num_counterfactuals)]
+        # No duplicate CF types per scene: sample without replacement
+        n = min(num_counterfactuals, len(pool))
+        selected_types = random.sample(pool, n) if n > 0 else []
     elif semantic_only:
         pool = list(IMAGE_COUNTERFACTUALS.keys())
         selected_types = [random.choice(pool) for _ in range(num_counterfactuals)]

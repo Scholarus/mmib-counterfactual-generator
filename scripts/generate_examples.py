@@ -43,8 +43,7 @@ def generate_all_counterfactual_examples(output_dir='output/counterfactual_examp
     if render:
         os.makedirs(images_dir, exist_ok=True)
     os.makedirs(scenes_dir, exist_ok=True)
-    
-    # Setup Blender
+
     blender_path = find_blender()
     create_patched_utils()
     create_patched_render_script()
@@ -62,36 +61,30 @@ def generate_all_counterfactual_examples(output_dir='output/counterfactual_examp
     if not base_scene or len(base_scene.get('objects', [])) == 0:
         print("ERROR: Failed to generate base scene")
         return
-    
-    # Save original scene
+
     original_path = os.path.join(scenes_dir, '00_original.json')
     save_scene(base_scene, original_path)
     print(f"  [OK] Saved original scene: {original_path}")
-    
-    # Render original if requested
+
     if render:
         original_image = os.path.join(images_dir, '00_original.png')
         print(f"  Rendering original scene...")
         render_scene(blender_path, original_path, original_image, use_gpu=use_gpu)
         if os.path.exists(original_image):
             print(f"  [OK] Rendered: 00_original.png")
-    
-    # Generate examples for each counterfactual type
+
     all_cf_types = {**IMAGE_COUNTERFACTUALS, **NEGATIVE_COUNTERFACTUALS}
     total_cfs = len(all_cf_types)
     
     print(f"\n2. Generating {total_cfs} counterfactual examples...")
-    
-    # Process image counterfactuals
+
     image_cf_index = 1
     for cf_type, cf_func in sorted(IMAGE_COUNTERFACTUALS.items()):
         print(f"\n  [Image CF {image_cf_index}/{len(IMAGE_COUNTERFACTUALS)}] Applying: {cf_type}")
-        
-        # Apply counterfactual
+
         try:
             cf_scene, description = cf_func(copy.deepcopy(base_scene))
-            
-            # Add metadata
+
             cf_scene['cf_metadata'] = {
                 'variant': f'image_cf_{image_cf_index}',
                 'is_counterfactual': True,
@@ -101,22 +94,20 @@ def generate_all_counterfactual_examples(output_dir='output/counterfactual_examp
                 'cf_description': description,
                 'source_scene': '00_original'
             }
-            
-            # Create descriptive filename
+
             filename = f"01_image_{image_cf_index:02d}_{cf_type}.json"
             cf_path = os.path.join(scenes_dir, filename)
             
             save_scene(cf_scene, cf_path)
             print(f"    [OK] Saved: {filename}")
             print(f"      Description: {description}")
-            
-            # Render if requested
+
             if render:
                 cf_image = os.path.join(images_dir, filename.replace('.json', '.png'))
                 render_scene(blender_path, cf_path, cf_image, use_gpu=use_gpu)
                 if os.path.exists(cf_image):
                     print(f"    [OK] Rendered: {filename.replace('.json', '.png')}")
-            
+
             image_cf_index += 1
             
         except Exception as e:
@@ -124,21 +115,17 @@ def generate_all_counterfactual_examples(output_dir='output/counterfactual_examp
             import traceback
             traceback.print_exc()
             continue
-    
-    # Process negative counterfactuals
+
     negative_cf_index = 1
     for cf_type, cf_func in sorted(NEGATIVE_COUNTERFACTUALS.items()):
         print(f"\n  [Negative CF {negative_cf_index}/{len(NEGATIVE_COUNTERFACTUALS)}] Applying: {cf_type}")
-        
-        # Apply counterfactual
+
         try:
-            # Use stronger noise for examples (medium or heavy)
             if cf_type == 'add_noise':
                 cf_scene, description = cf_func(copy.deepcopy(base_scene), min_noise_level='medium')
             else:
                 cf_scene, description = cf_func(copy.deepcopy(base_scene))
-            
-            # Add metadata
+
             cf_scene['cf_metadata'] = {
                 'variant': f'negative_cf_{negative_cf_index}',
                 'is_counterfactual': True,
@@ -148,22 +135,20 @@ def generate_all_counterfactual_examples(output_dir='output/counterfactual_examp
                 'cf_description': description,
                 'source_scene': '00_original'
             }
-            
-            # Create descriptive filename
+
             filename = f"02_negative_{negative_cf_index:02d}_{cf_type}.json"
             cf_path = os.path.join(scenes_dir, filename)
             
             save_scene(cf_scene, cf_path)
             print(f"    [OK] Saved: {filename}")
             print(f"      Description: {description}")
-            
-            # Render if requested
+
             if render:
                 cf_image = os.path.join(images_dir, filename.replace('.json', '.png'))
                 render_scene(blender_path, cf_path, cf_image, use_gpu=use_gpu)
                 if os.path.exists(cf_image):
                     print(f"    [OK] Rendered: {filename.replace('.json', '.png')}")
-            
+
             negative_cf_index += 1
             
         except Exception as e:
@@ -171,8 +156,7 @@ def generate_all_counterfactual_examples(output_dir='output/counterfactual_examp
             import traceback
             traceback.print_exc()
             continue
-    
-    # Create a summary file
+
     summary = {
         'base_scene': '00_original.json',
         'total_counterfactuals': len(all_cf_types),
@@ -180,8 +164,7 @@ def generate_all_counterfactual_examples(output_dir='output/counterfactual_examp
         'negative_counterfactuals': len(NEGATIVE_COUNTERFACTUALS),
         'counterfactuals': {}
     }
-    
-    # Add image counterfactuals to summary
+
     image_cf_index = 1
     for cf_type in sorted(IMAGE_COUNTERFACTUALS.keys()):
         filename = f"01_image_{image_cf_index:02d}_{cf_type}.json"
@@ -191,8 +174,7 @@ def generate_all_counterfactual_examples(output_dir='output/counterfactual_examp
             'index': image_cf_index
         }
         image_cf_index += 1
-    
-    # Add negative counterfactuals to summary
+
     negative_cf_index = 1
     for cf_type in sorted(NEGATIVE_COUNTERFACTUALS.keys()):
         filename = f"02_negative_{negative_cf_index:02d}_{cf_type}.json"
@@ -202,7 +184,7 @@ def generate_all_counterfactual_examples(output_dir='output/counterfactual_examp
             'index': negative_cf_index
         }
         negative_cf_index += 1
-    
+
     summary_path = os.path.join(output_dir, 'summary.json')
     with open(summary_path, 'w') as f:
         json.dump(summary, f, indent=2)

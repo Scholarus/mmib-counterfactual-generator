@@ -190,7 +190,7 @@ python3 pipeline.py --num_scenes 10 --min_cf_change_score 1.5 --max_cf_attempts 
 
 The pipeline supports 17 different counterfactual types, divided into two categories:
 
-**Image Counterfactuals** (Should change VQA answers - 8 types):
+**Image Counterfactuals** (Should change VQA answers - 10 types):
 - `change_color` - Change the color of a random object (e.g., red → blue)
 - `change_shape` - Change the shape of a random object (cube/sphere/cylinder)
 - `change_size` - Change the size of a random object (small ↔ large)
@@ -199,11 +199,14 @@ The pipeline supports 17 different counterfactual types, divided into two catego
 - `add_object` - Add a new random object to the scene
 - `remove_object` - Remove a random object from the scene
 - `replace_object` - Replace an object with a different one (keeping position)
+- `swap_attribute` - Swap an attribute (e.g. color) between two objects
+- `relational_flip` - Move object from left of X to right of X
 
-**Negative Counterfactuals** (Should NOT change VQA answers - 7 types):
+**Negative Counterfactuals** (Should NOT change VQA answers - 8 types):
 - `change_background` - Change the background/ground color
 - `change_lighting` - Change lighting conditions (bright/dim/warm/cool/dramatic)
 - `add_noise` - Add image noise/grain (light/medium/heavy levels)
+- `occlusion_change` - Move object to partially hide another (visual only; answers unchanged)
 - `apply_fisheye` - Apply fisheye lens distortion effect
 - `apply_blur` - Apply Gaussian blur filter
 - `apply_vignette` - Apply vignette effect (edge darkening)

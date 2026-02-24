@@ -55,15 +55,6 @@ def set_layer(obj, layer_idx):
     obj.layers[i] = (i == layer_idx)
 
 def add_object(object_dir, name, scale, loc, theta=0):
-  """
-  Load an object from a file. We assume that in the directory object_dir, there
-  is a file named "$name.blend" which contains a single object named "$name"
-  that has unit size and is centered at the origin.
-
-  - scale: scalar giving the size that the object should be in the scene
-  - loc: tuple (x, y) giving the coordinates on the ground plane where the
-    object should be placed.
-  """
   if not INSIDE_BLENDER:
     return
   object_dir = os.path.abspath(os.path.normpath(object_dir))
@@ -103,11 +94,6 @@ def add_object(object_dir, name, scale, loc, theta=0):
   bpy.ops.transform.translate(value=(x, y, scale))
 
 def load_materials(material_dir):
-  """
-  Load materials from a directory. We assume that the directory contains .blend
-  files with one material each. The file X.blend has a single NodeTree item named
-  X; this NodeTree item must have a "Color" input that accepts an RGBA value.
-  """
   if not INSIDE_BLENDER:
     return
   material_dir = os.path.abspath(os.path.normpath(material_dir))
@@ -136,7 +122,6 @@ def load_materials(material_dir):
       raise
 
 def apply_filter_to_image(image_path, filter_type, filter_strength):
-  """Apply post-processing filters to rendered image"""
   image_path = os.path.abspath(image_path)
   if Image is None:
     print(f"ERROR: PIL/Image not available, cannot apply filter {filter_type}")
@@ -211,10 +196,6 @@ def apply_filter_to_image(image_path, filter_type, filter_strength):
     raise
 
 def add_material(name, **properties):
-  """
-  Create a new material and assign it to the active object. "name" should be the
-  name of a material that has been previously loaded using load_materials.
-  """
   if not INSIDE_BLENDER:
     return
   mat_count = len(bpy.data.materials)
@@ -418,7 +399,6 @@ def set_background_color(color_name):
   print(f"Set background color to {color_name}: RGB{rgb}")
 
 def set_ground_color(color_name):
-  """Set the ground plane color if it exists"""
   if not INSIDE_BLENDER:
     return
   if color_name not in BACKGROUND_COLORS or BACKGROUND_COLORS[color_name] is None:
@@ -792,9 +772,6 @@ def render_scene(args,
 
 
 def add_random_objects(scene_struct, num_objects, args, camera, max_scene_attempts=10):
-  """
-  Add random objects to the current blender scene
-  """
   scene_attempt = 0
   while scene_attempt < max_scene_attempts:
     scene_attempt += 1
@@ -931,10 +908,6 @@ def compute_all_relationships(scene_struct, eps=0.2):
 
 
 def check_visibility(blender_objects, min_pixels_per_object):
-  """
-  Ensure each object has at least min_pixels_per_object visible pixels in the
-  rendered image (rejects scenes where an object is fully occluded by others).
-  """
   if not INSIDE_BLENDER or not blender_objects:
     return True
   if Image is None:
@@ -1045,7 +1018,6 @@ def render_shadeless(blender_objects, path='flat.png', use_distinct_colors=False
 
 if __name__ == '__main__':
   if INSIDE_BLENDER:
-    # Run normally
     argv = extract_args()
     args = parser.parse_args(argv)
     main(args)

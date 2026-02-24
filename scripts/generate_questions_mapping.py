@@ -38,6 +38,10 @@ def load_scene(scene_file):
     with open(scene_file, 'r') as f:
         return json.load(f)
 
+RELATION_KEYS_TO_PHRASES = {'left': 'left of', 'right': 'right of', 'front': 'in front of', 'behind': 'behind'}
+DEFAULT_RELATIONS = ['left of', 'right of', 'in front of', 'behind']
+
+
 def get_scene_properties(scene):
     objects = scene.get('objects', [])
     if not objects:
@@ -45,13 +49,18 @@ def get_scene_properties(scene):
             'colors': ['red', 'blue', 'green'],
             'shapes': ['cube', 'sphere', 'cylinder'],
             'materials': ['metal', 'rubber'],
-            'sizes': ['small', 'large']
+            'sizes': ['small', 'large'],
+            'relations': DEFAULT_RELATIONS
         }
     
     colors = list(set(obj.get('color') for obj in objects if obj.get('color')))
     shapes = list(set(obj.get('shape') for obj in objects if obj.get('shape')))
     materials = list(set(obj.get('material') for obj in objects if obj.get('material')))
     sizes = list(set(obj.get('size') for obj in objects if obj.get('size')))
+    relationships = scene.get('relationships') or {}
+    relations = [RELATION_KEYS_TO_PHRASES[k] for k in relationships if k in RELATION_KEYS_TO_PHRASES]
+    if not relations:
+        relations = DEFAULT_RELATIONS
     
     all_colors = ['gray', 'red', 'blue', 'green', 'brown', 'purple', 'cyan', 'yellow']
     all_shapes = ['cube', 'sphere', 'cylinder']
@@ -63,6 +72,7 @@ def get_scene_properties(scene):
         'shapes': shapes if shapes else all_shapes,
         'materials': materials if materials else all_materials,
         'sizes': sizes if sizes else all_sizes,
+        'relations': relations,
         'all_colors': all_colors,
         'all_shapes': all_shapes,
         'all_materials': all_materials,
@@ -72,11 +82,12 @@ def get_scene_properties(scene):
 IMAGE_CF_TYPES = {
     'change_color', 'change_shape', 'change_size', 'change_material',
     'change_position', 'add_object', 'remove_object', 'replace_object',
-    'swap_attribute', 'occlusion_change', 'relational_flip'
+    'swap_attribute', 'relational_flip'
 }
 NEGATIVE_CF_TYPES = {
     'change_background', 'change_lighting', 'add_noise',
-    'apply_fisheye', 'apply_blur', 'apply_vignette', 'apply_chromatic_aberration'
+    'apply_fisheye', 'apply_blur', 'apply_vignette', 'apply_chromatic_aberration',
+    'occlusion_change'
 }
 
 MAX_CF_ANSWER_RETRIES = 150
@@ -143,7 +154,6 @@ def _pluralize_shape(shape):
 
 
 def _count_by_attribute(objects, attr):
-    """Count objects per attribute value (color, shape, material, size)."""
     counts = {}
     for obj in objects:
         val = (obj.get(attr) or '').lower().strip()
@@ -153,7 +163,6 @@ def _count_by_attribute(objects, attr):
 
 
 def _get_attributes_with_different_counts(original_scene, cf_scene):
-    """Find attribute values whose count differs between original and CF scene."""
     orig_objs = original_scene.get('objects', [])
     cf_objs = cf_scene.get('objects', [])
     differing = []
@@ -170,7 +179,6 @@ def _get_attributes_with_different_counts(original_scene, cf_scene):
 
 
 def generate_question_for_counterfactual(cf_type, original_scene, cf_scene, retry_index=0):
-    """Generate a question tailored to cf_type. Use retry_index to vary question on retries."""
     random.seed(hash((str(cf_type), retry_index, str(id(original_scene)), str(id(cf_scene)))))
     change = get_change_details(original_scene, cf_scene)
     orig_objs = original_scene.get('objects', [])
@@ -178,7 +186,6 @@ def generate_question_for_counterfactual(cf_type, original_scene, cf_scene, retr
     props_orig = get_scene_properties(original_scene)
     props_cf = get_scene_properties(cf_scene)
 
-    # For IMAGE CFs: prefer questions targeting attributes that differ between orig and cf
     if cf_type and cf_type in IMAGE_CF_TYPES:
         differing = _get_attributes_with_different_counts(original_scene, cf_scene)
         if differing:
@@ -288,7 +295,7 @@ def generate_question_for_counterfactual(cf_type, original_scene, cf_scene, retr
                     question = template.format(val=val)
                 return question, {attr: val.rstrip('s') if attr == 'shape' else val}
 
-    if cf_type in ('change_size', 'change_material', 'change_position', 'swap_attribute', 'occlusion_change', 'relational_flip'):
+    if cf_type in ('change_size', 'change_material', 'change_position', 'swap_attribute', 'relational_flip'):
         key = 'sizes' if cf_type == 'change_size' else ('materials' if cf_type == 'change_material' else 'colors')
         attr = key.rstrip('s')
         vals = list(props_cf.get(key) or props_orig.get(key) or [])
@@ -347,6 +354,46 @@ def generate_question_for_scene(scene_file):
         ("What is the total number of {color} {material} objects?", {
             'color': random.choice(props['colors']),
             'material': random.choice(props['materials'])
+        }),
+        ("What color is the object {relation} the {color} {shape}?", {
+            'relation': random.choice(props['relations']),
+            'color': random.choice(props['colors']),
+            'shape': random.choice(props['shapes'])
+        }),
+        ("What shape is the object {relation} the {material} object?", {
+            'relation': random.choice(props['relations']),
+            'material': random.choice(props['materials'])
+        }),
+        ("What material is the {size} object {relation} the {shape}?", {
+            'size': random.choice(props['sizes']),
+            'relation': random.choice(props['relations']),
+            'shape': random.choice(props['shapes'])
+        }),
+        ("How many objects are {relation} the {color} {shape}?", {
+            'relation': random.choice(props['relations']),
+            'color': random.choice(props['colors']),
+            'shape': random.choice(props['shapes'])
+        }),
+        ("How many {material} objects are {relation} the {shape}?", {
+            'material': random.choice(props['materials']),
+            'relation': random.choice(props['relations']),
+            'shape': random.choice(props['shapes'])
+        }),
+        ("What is the total number of {size} objects {relation} the {color} object?", {
+            'size': random.choice(props['sizes']),
+            'relation': random.choice(props['relations']),
+            'color': random.choice(props['colors'])
+        }),
+        ("Is there a {color} object {relation} the {shape}?", {
+            'color': random.choice(props['colors']),
+            'relation': random.choice(props['relations']),
+            'shape': random.choice(props['shapes'])
+        }),
+        ("Are there any {material} {shape}s {relation} the {size} object?", {
+            'material': random.choice(props['materials']),
+            'shape': random.choice(props['shapes']),
+            'relation': random.choice(props['relations']),
+            'size': random.choice(props['sizes'])
         }),
     ]
     
@@ -424,6 +471,13 @@ def create_counterfactual_questions(original_question, params, scene):
                     alternatives = [s for s in props['all_sizes'] if s != params.get('size')]
                     if alternatives:
                         cf_params['size'] = random.choice(alternatives)
+                    else:
+                        strategy = 'negation'
+                        continue
+                elif param_to_change == 'relation':
+                    alternatives = [r for r in props['relations'] if r != params.get('relation')]
+                    if alternatives:
+                        cf_params['relation'] = random.choice(alternatives)
                     else:
                         strategy = 'negation'
                         continue
@@ -884,8 +938,20 @@ def count_matching_objects(question_lower, objects):
     
     return count
 
+
+def classify_question_validity(question, base_scene_graph, counterfactual_scene_graph):
+    answer_base = answer_question_for_scene(question, base_scene_graph)
+    answer_cf = answer_question_for_scene(question, counterfactual_scene_graph)
+    norm_base = normalize_answer(answer_base)
+    norm_cf = normalize_answer(answer_cf)
+    if norm_base != norm_cf:
+        return 'Semantic-Valid'
+    return 'Negative-Valid'
+
+
 def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_questions.csv',
-                                   generate_questions=False, with_links=False, base_url=None):
+                                   generate_questions=False, with_links=False, base_url=None,
+                                   strict_question_validation=True):
     images_dir = os.path.join(run_dir, 'images')
     scenes_dir = os.path.join(run_dir, 'scenes')
     
@@ -1046,15 +1112,21 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
                     traceback.print_exc()
                     continue
                 
-                # For image CFs: ensure CF image's answer to CF question differs from original image's answer to same question.
-                # change_position, occlusion_change, relational_flip only move objects.
-                # swap_attribute swaps colors (same net counts). Our QA cannot distinguish, so skip validation.
-                CF_TYPES_ACCEPT_WITHOUT_CHECK = {'change_position', 'swap_attribute', 'occlusion_change', 'relational_flip'}
-                cf1_differs = (cf1_type not in IMAGE_CF_TYPES) or (cf1_type in CF_TYPES_ACCEPT_WITHOUT_CHECK) or (normalize_answer(original_ans_cf1_q) != normalize_answer(cf1_ans_cf1_q))
-                cf2_differs = (cf2_type not in IMAGE_CF_TYPES) or (cf2_type in CF_TYPES_ACCEPT_WITHOUT_CHECK) or (normalize_answer(original_ans_cf2_q) != normalize_answer(cf2_ans_cf2_q))
-                # Accept when at least one CF has different answers (maximize usable data; the other may have same answer due to count-preserving swaps)
-                if cf1_differs or cf2_differs:
-                    break
+                if strict_question_validation:
+                    cf1_validity = classify_question_validity(cf1_question, original_scene, cf1_scene)
+                    cf2_validity = classify_question_validity(cf2_question, original_scene, cf2_scene)
+                    cf1_required = 'Semantic-Valid' if (cf1_type and cf1_type in IMAGE_CF_TYPES) else 'Negative-Valid'
+                    cf2_required = 'Semantic-Valid' if (cf2_type and cf2_type in IMAGE_CF_TYPES) else 'Negative-Valid'
+                    cf1_ok = (cf1_required == cf1_validity)
+                    cf2_ok = (cf2_required == cf2_validity)
+                    if cf1_ok and cf2_ok:
+                        break
+                else:
+                    CF_TYPES_ACCEPT_WITHOUT_CHECK = {'change_position', 'swap_attribute', 'relational_flip'}
+                    cf1_differs = (cf1_type not in IMAGE_CF_TYPES) or (cf1_type in CF_TYPES_ACCEPT_WITHOUT_CHECK) or (normalize_answer(original_ans_cf1_q) != normalize_answer(cf1_ans_cf1_q))
+                    cf2_differs = (cf2_type not in IMAGE_CF_TYPES) or (cf2_type in CF_TYPES_ACCEPT_WITHOUT_CHECK) or (normalize_answer(original_ans_cf2_q) != normalize_answer(cf2_ans_cf2_q))
+                    if cf1_differs or cf2_differs:
+                        break
             else:
                 print(f"WARNING: Scene {scene_num}: could not find questions with different answers for both CFs after {MAX_CF_ANSWER_RETRIES} retries (scene included with best-effort questions)")
             
@@ -1100,7 +1172,6 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
                 traceback.print_exc()
                 continue
         else:
-            # Load CF scene files to get cf_type and cf_description for the mapping
             cf1_type = cf2_type = cf1_description = cf2_description = ''
             cf1_scene_file = find_scene_file(scenes_dir, cf1_id)
             cf2_scene_file = find_scene_file(scenes_dir, cf2_id)
@@ -1194,6 +1265,8 @@ def main():
                        help='Output CSV filename')
     parser.add_argument('--generate_questions', action='store_true',
                        help='Generate questions and answers for each scene set')
+    parser.add_argument('--no_strict_validation', action='store_true',
+                       help='Disable strict question validation (Semantic-Valid / Negative-Valid classifier); use legacy accept logic')
     
     args = parser.parse_args()
     
@@ -1202,7 +1275,6 @@ def main():
         if run_dir is None:
             print(f"ERROR: Could not find any run directories in {args.output_dir}")
             return
-            print(f"Using latest run: {run_dir}")
     else:
         if os.path.exists(os.path.join(args.output_dir, 'images')) and \
            os.path.exists(os.path.join(args.output_dir, 'scenes')):
@@ -1218,7 +1290,8 @@ def main():
     generate_mapping_with_questions(
         run_dir,
         args.csv_name,
-        args.generate_questions
+        args.generate_questions,
+        strict_question_validation=not args.no_strict_validation
     )
 
 if __name__ == '__main__':

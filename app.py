@@ -194,7 +194,6 @@ def generate_fallback_scene(num_objects, scene_idx):
 
 
 def generate_question_for_scene_dict(scene):
-    """Generate a question for a scene dictionary (adapter for generate_question_for_scene)"""
     if _generate_question_for_scene_file is None:
         objects = scene.get('objects', [])
         if len(objects) == 0:
@@ -226,12 +225,6 @@ def generate_counterfactual_scenes(num_scenes, num_objects, min_objects, max_obj
                                     cf_types, same_cf_type, min_change_score, max_cf_attempts, min_noise_level,
                                     output_dir, blender_path=None, use_gpu=0, samples=512, 
                                     width=320, height=240, skip_render=False, generate_questions=False):
-    """
-    Generate counterfactual scenes and optionally render them.
-    
-    Returns:
-        Dictionary with success status and results
-    """
     if not PIPELINE_AVAILABLE:
         return {
             'success': False,
@@ -378,7 +371,9 @@ def generate_counterfactual_scenes(num_scenes, num_objects, min_objects, max_obj
                 same_cf_type=same_cf_type,
                 min_change_score=min_change_score,
                 max_cf_attempts=max_cf_attempts,
-                min_noise_level='light'
+                min_noise_level='light',
+                semantic_only=semantic_only,
+                negative_only=negative_only
             )
             
             scene_num = scene_idx + 1
@@ -460,7 +455,8 @@ def generate_counterfactual_scenes(num_scenes, num_objects, min_objects, max_obj
                     run_dir=output_dir,
                     csv_filename=csv_filename,
                     generate_questions=generate_questions,
-                    with_links=False
+                    with_links=False,
+                    strict_question_validation=True
                 )
                 csv_created = os.path.exists(csv_path)
             else:
@@ -613,6 +609,16 @@ def main():
         
         st.markdown("**Counterfactual Types**")
         st.caption("Leave all unchecked to use default behavior (1 Image CF + 1 Negative CF)")
+        semantic_only = st.checkbox(
+            "Semantic only",
+            value=False,
+            help="Generate only Semantic/Image counterfactuals (Change Color, Add Object, etc.); no Negative CFs"
+        )
+        negative_only = st.checkbox(
+            "Negative only",
+            value=False,
+            help="Generate only Negative counterfactuals (Change Lighting, Add Noise, Occlusion Change, etc.); no Semantic CFs"
+        )
         same_cf_type = st.checkbox(
             "Same CF type for all",
             value=False,
@@ -628,13 +634,13 @@ def main():
             use_remove_object = st.checkbox("Remove Object", value=False)
             use_replace_object = st.checkbox("Replace Object", value=False)
             use_swap_attribute = st.checkbox("Swap Attribute", value=False)
-            use_occlusion_change = st.checkbox("Occlusion Change", value=False)
             use_relational_flip = st.checkbox("Relational Flip", value=False)
         
         with st.expander("Negative CFs (don't change answers)", expanded=False):
             use_change_background = st.checkbox("Change Background", value=False)
             use_change_lighting = st.checkbox("Change Lighting", value=False)
             use_add_noise = st.checkbox("Add Noise", value=False)
+            use_occlusion_change = st.checkbox("Occlusion Change", value=False)
             use_apply_fisheye = st.checkbox("Apply Fisheye", value=False)
             use_apply_blur = st.checkbox("Apply Blur", value=False)
             use_apply_vignette = st.checkbox("Apply Vignette", value=False)
@@ -722,8 +728,6 @@ def main():
             cf_types.append('replace_object')
         if use_swap_attribute:
             cf_types.append('swap_attribute')
-        if use_occlusion_change:
-            cf_types.append('occlusion_change')
         if use_relational_flip:
             cf_types.append('relational_flip')
         if use_change_background:
@@ -732,6 +736,8 @@ def main():
             cf_types.append('change_lighting')
         if use_add_noise:
             cf_types.append('add_noise')
+        if use_occlusion_change:
+            cf_types.append('occlusion_change')
         if use_apply_fisheye:
             cf_types.append('apply_fisheye')
         if use_apply_blur:

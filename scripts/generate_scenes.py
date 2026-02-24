@@ -60,6 +60,10 @@ def main():
                        'apply_fisheye', 'apply_blur', 'apply_vignette', 'apply_chromatic_aberration'
                    ],
                    help='Specific counterfactual types to use')
+    parser.add_argument('--semantic_only', action='store_true',
+                   help='Generate only Semantic/Image counterfactuals (no Negative CFs)')
+    parser.add_argument('--negative_only', action='store_true',
+                   help='Generate only Negative counterfactuals (no Semantic CFs)')
     parser.add_argument('--same_cf_type', action='store_true',
                    help='Use the same counterfactual type for all variants')
     parser.add_argument('--min_cf_change_score', type=float, default=1.0,
@@ -153,7 +157,9 @@ def main():
             same_cf_type=args.same_cf_type,
             min_change_score=args.min_cf_change_score,
             max_cf_attempts=args.max_cf_attempts,
-            min_noise_level=args.min_noise_level
+            min_noise_level=args.min_noise_level,
+            semantic_only=args.semantic_only,
+            negative_only=args.negative_only
         )
         
         for idx, cf in enumerate(counterfactuals):
@@ -205,6 +211,8 @@ def main():
         'successful_scenes': successful_scenes,
         'successful_renders': 0,
         'cf_types': args.cf_types if args.cf_types else 'default',
+        'semantic_only': args.semantic_only,
+        'negative_only': args.negative_only,
     }
     
     metadata_path = os.path.join(run_dir, 'run_metadata.json')

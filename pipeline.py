@@ -139,28 +139,25 @@ def create_patched_render_script():
     
     patched_content = patched_content.replace(
         '  render_args.tile_x = args.render_tile_size\n  render_args.tile_y = args.render_tile_size',
-        '  # tile_x/tile_y removed in Blender 4.x'
+        '  pass'
     )
     
     patched_content = patched_content.replace("render_args.engine = 'BLENDER_EEVEE'", "render_args.engine = 'CYCLES'")
     
     patched_content = patched_content.replace(
         "bpy.data.worlds['World'].cycles.sample_as_light = True",
-        "# sample_as_light removed in Blender 5.x"
+        "pass"
     )
     patched_content = patched_content.replace(
         "bpy.context.scene.cycles.transparent_min_bounces = args.render_min_bounces",
-        "# transparent_min_bounces removed in Blender 5.x"
+        "pass"
     )
     patched_content = patched_content.replace(
         "bpy.context.scene.cycles.transparent_max_bounces = args.render_max_bounces",
-        "# transparent_max_bounces removed in Blender 5.x"
+        "pass"
     )
-    
-    # Disable margin check to prevent "BROKEN MARGIN!" errors
-    # This makes object placement more flexible
+
     if "margins_good = True" in patched_content and "BROKEN MARGIN!" in patched_content:
-        # Replace the margin check loop with a simple pass
         old_margin_check = """          for direction_name in ['left', 'right', 'front', 'behind']:
             direction_vec = scene_struct['directions'][direction_name]
             assert direction_vec[2] == 0
@@ -171,13 +168,11 @@ def create_patched_render_script():
               margins_good = False
               break"""
         
-        new_margin_check = """          # Margin check disabled for more flexible object placement
-          # margins_good remains True"""
+        new_margin_check = """          pass"""
         
         if old_margin_check in patched_content:
             patched_content = patched_content.replace(old_margin_check, new_margin_check)
     
-    # Visibility check left enabled (no longer patched to return True)
     patched_content = patched_content.replace(
         "parser.add_argument('--min_pixels_per_object', default=200, type=int,",
         "parser.add_argument('--min_pixels_per_object', default=50, type=int,"
@@ -186,7 +181,6 @@ def create_patched_render_script():
         "parser.add_argument('--max_retries', default=50, type=int,",
         "parser.add_argument('--max_retries', default=200, type=int,"
     )
-    # Also catch the default=100 case if it was already patched
     patched_content = patched_content.replace(
         "parser.add_argument('--max_retries', default=100, type=int,",
         "parser.add_argument('--max_retries', default=200, type=int,"
@@ -478,93 +472,6 @@ def cf_change_position(scene):
     
     return cf_scene, f"no move (couldn't find collision-free position for {obj['color']} {obj['shape']})"
 
-def cf_change_surrounding_count(scene):
-    cf_scene = copy.deepcopy(scene)
-    
-    if len(cf_scene['objects']) == 0:
-        return cf_scene, "no change (0 objects)"
-    
-    try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        with open(os.path.join(script_dir, 'data', 'properties.json'), 'r') as f:
-            properties = json.load(f)
-            size_mapping = properties['sizes']
-    except Exception:
-        size_mapping = {'small': 0.35, 'large': 0.7}
-    
-    action = random.choice(['add', 'remove'])
-    
-    if action == 'add' or len(cf_scene['objects']) <= 1:
-        target_idx = random.randint(0, len(cf_scene['objects']) - 1)
-        target_obj = cf_scene['objects'][target_idx]
-        target_x, target_y, target_z = target_obj['3d_coords']
-        
-        num_to_add = random.randint(1, 2)
-        shapes = ['cube', 'sphere', 'cylinder']
-        colors = ['gray', 'red', 'blue', 'green', 'brown', 'purple', 'cyan', 'yellow']
-        materials = ['metal', 'rubber']
-        sizes = ['small', 'large']
-        
-        min_dist = 0.25
-        added_count = 0
-        
-        for _ in range(num_to_add):
-            for attempt in range(50):
-                offset_x = random.uniform(-1.5, 1.5)
-                offset_y = random.uniform(-1.5, 1.5)
-                new_x = max(-3, min(3, target_x + offset_x))
-                new_y = max(-3, min(3, target_y + offset_y))
-                
-                # Choose random size for new object
-                new_size = random.choice(sizes)
-                new_shape = random.choice(shapes)
-                new_r = size_mapping[new_size]
-                if new_shape == 'cube':
-                    new_r /= math.sqrt(2)
-                
-                collision = False
-                for other_obj in cf_scene['objects']:
-                    other_x, other_y, _ = other_obj['3d_coords']
-                    other_r = size_mapping.get(other_obj['size'], 0.5)
-                    if other_obj['shape'] == 'cube':
-                        other_r /= math.sqrt(2)
-                    
-                    dist = math.sqrt((new_x - other_x)**2 + (new_y - other_y)**2)
-                    if dist < (new_r + other_r + min_dist):
-                        collision = True
-                        break
-                
-                # If no collision, add the object
-                if not collision:
-                    new_obj = {
-                        'shape': new_shape,
-                        'color': random.choice(colors),
-                        'material': random.choice(materials),
-                        'size': new_size,
-                        '3d_coords': [new_x, new_y, 0.35],
-                        'rotation': random.uniform(0, 360),
-                        'pixel_coords': [0, 0, 0]
-                    }
-                    cf_scene['objects'].append(new_obj)
-                    added_count += 1
-                    break
-        
-        if added_count > 0:
-            return cf_scene, f"added {added_count} objects near {target_obj['color']} {target_obj['shape']}"
-        else:
-            return cf_scene, "no change (couldn't find valid positions for new objects)"
-    
-    else:
-        num_to_remove = min(random.randint(1, 2), len(cf_scene['objects']) - 1)
-        removed = []
-        for _ in range(num_to_remove):
-            if len(cf_scene['objects']) > 1:
-                remove_idx = random.randint(0, len(cf_scene['objects']) - 1)
-                removed_obj = cf_scene['objects'].pop(remove_idx)
-                removed.append(f"{removed_obj['color']} {removed_obj['shape']}")
-        
-        return cf_scene, f"removed {', '.join(removed)}"
-
 def cf_add_object(scene):
     cf_scene = copy.deepcopy(scene)
     
@@ -665,7 +572,6 @@ def cf_replace_object(scene):
 
 
 def cf_swap_attribute(scene):
-    """Swap colors between two existing objects. Tests if model relies on priors (e.g. sphere=red)."""
     cf_scene = copy.deepcopy(scene)
     
     if len(cf_scene['objects']) < 2:
@@ -689,7 +595,6 @@ TARGET_OCCLUSION_COVERAGE = 0.6
 
 
 def cf_occlusion_change(scene):
-    """Move an object so it partially hides another. Tests spatial depth and partial shape recognition."""
     cf_scene = copy.deepcopy(scene)
     
     if len(cf_scene['objects']) < 2:
@@ -757,7 +662,6 @@ def cf_occlusion_change(scene):
 
 
 def cf_relational_flip(scene):
-    """Move object A from 'left of B' to 'right of B' (or vice versa). Targets spatial prepositions."""
     cf_scene = copy.deepcopy(scene)
     
     if len(cf_scene['objects']) < 2:
@@ -862,27 +766,6 @@ def cf_change_background(scene):
     cf_scene['background_color'] = new_background
     
     return cf_scene, f"changed background to {new_background}"
-
-def cf_change_texture(scene):
-    cf_scene = copy.deepcopy(scene)
-    
-    if len(cf_scene['objects']) == 0:
-        return cf_scene, "no change (0 objects)"
-    
-    current_materials = {obj.get('material') for obj in cf_scene.get('objects', [])}
-    new_material = random.choice(['metal', 'rubber'])
-    if len(current_materials) == 1 and new_material in current_materials:
-        new_material = 'rubber' if new_material == 'metal' else 'metal'
-    changed_count = 0
-    
-    for obj in cf_scene['objects']:
-        if obj['material'] != new_material:
-            obj['material'] = new_material
-            changed_count += 1
-    
-    cf_scene['texture_style'] = new_material
-    
-    return cf_scene, f"changed {changed_count} objects to {new_material} texture"
 
 def cf_change_shape(scene):
     cf_scene = copy.deepcopy(scene)
@@ -1028,11 +911,9 @@ IMAGE_COUNTERFACTUALS = {
     'remove_object': cf_remove_object,
     'replace_object': cf_replace_object,
     'swap_attribute': cf_swap_attribute,
-    'occlusion_change': cf_occlusion_change,
     'relational_flip': cf_relational_flip,
 }
 
-# Negative CFs - These should NOT change answers to questions
 NEGATIVE_COUNTERFACTUALS = {
     'change_background': cf_change_background,
     'change_lighting': cf_change_lighting,
@@ -1041,13 +922,14 @@ NEGATIVE_COUNTERFACTUALS = {
     'apply_blur': cf_apply_blur,
     'apply_vignette': cf_apply_vignette,
     'apply_chromatic_aberration': cf_apply_chromatic_aberration,
+    'occlusion_change': cf_occlusion_change,
 }
 
 DEFAULT_NEGATIVE_CF_TYPES = [k for k in NEGATIVE_COUNTERFACTUALS if k != 'apply_fisheye']
 
 COUNTERFACTUAL_TYPES = {**IMAGE_COUNTERFACTUALS, **NEGATIVE_COUNTERFACTUALS}
 
-def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, same_cf_type=False, min_change_score=1.0, max_cf_attempts=10, min_noise_level='light'):
+def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, same_cf_type=False, min_change_score=1.0, max_cf_attempts=10, min_noise_level='light', semantic_only=False, negative_only=False):
     counterfactuals = []
 
     def compute_change_score(original_scene, cf_scene):
@@ -1058,11 +940,9 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, same_c
         orig_objs = original_scene.get('objects', []) or []
         cf_objs = cf_scene.get('objects', []) or []
 
-        # Count changes are usually very noticeable
         if len(orig_objs) != len(cf_objs):
             score += 5.0
 
-        # Object-level changes
         n = min(len(orig_objs), len(cf_objs))
         for i in range(n):
             o = orig_objs[i] or {}
@@ -1071,7 +951,6 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, same_c
                 if o.get(k) != c.get(k):
                     score += 1.0
 
-            # Position change (XY distance)
             o3 = o.get('3d_coords')
             c3 = c.get('3d_coords')
             try:
@@ -1079,11 +958,10 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, same_c
                     dx = float(c3[0]) - float(o3[0])
                     dy = float(c3[1]) - float(o3[1])
                     dist = math.sqrt(dx * dx + dy * dy)
-                    score += min(dist, 3.0)  # cap so it doesn't dominate
+                    score += min(dist, 3.0)
             except Exception:
                 pass
 
-            # Rotation change (small weight)
             try:
                 if o.get('rotation') is not None and c.get('rotation') is not None:
                     rot_diff = abs(float(c.get('rotation')) - float(o.get('rotation')))
@@ -1092,21 +970,17 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, same_c
             except Exception:
                 pass
 
-        # Scene-level (negative CF) fields
         if 'background_color' in cf_scene and original_scene.get('background_color') != cf_scene.get('background_color'):
             score += 1.0
             if cf_scene.get('background_color') in ['white', 'dark_gray']:
                 score += 0.5
         if 'lighting' in cf_scene and original_scene.get('lighting') != cf_scene.get('lighting'):
             score += 1.0
-        # NOTE: we intentionally DO NOT score `texture_style` because it is a
-        # derived field; the true visual change is captured by object material diffs.
         if 'noise_level' in cf_scene and original_scene.get('noise_level') != cf_scene.get('noise_level'):
             score += {'light': 0.5, 'medium': 1.0, 'heavy': 1.5}.get(cf_scene.get('noise_level'), 0.8)
         if 'filter_type' in cf_scene and original_scene.get('filter_type') != cf_scene.get('filter_type'):
-            # Filters are usually quite noticeable
             filter_strength = cf_scene.get('filter_strength', 1.0)
-            score += min(filter_strength, 2.0)  # Cap at 2.0
+            score += min(filter_strength, 2.0)
 
         return score
 
@@ -1117,7 +991,6 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, same_c
         attempts = 0
         for attempt in range(max_attempts):
             attempts = attempt + 1
-            # Special handling for add_noise to pass min_noise_level
             if cf_func == cf_add_noise:
                 candidate_scene, candidate_desc = cf_func(scene, min_noise_level=min_noise_level)
             else:
@@ -1130,13 +1003,40 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, same_c
         return best_scene, best_desc, best_score, attempts
     
     selected_types = None
+    if semantic_only and negative_only:
+        semantic_only = False
+        negative_only = False
     if same_cf_type and cf_types:
-        selected_types = [cf_types[0]] * num_counterfactuals
+        pool = cf_types
+        if semantic_only:
+            pool = [t for t in cf_types if t in IMAGE_COUNTERFACTUALS]
+        elif negative_only:
+            pool = [t for t in cf_types if t in NEGATIVE_COUNTERFACTUALS]
+        if pool:
+            selected_types = [pool[0]] * num_counterfactuals
+        else:
+            selected_types = [cf_types[0]] * num_counterfactuals if cf_types else None
     elif same_cf_type and not cf_types:
-        one_type = random.choice(list(COUNTERFACTUAL_TYPES.keys()))
+        if semantic_only:
+            one_type = random.choice(list(IMAGE_COUNTERFACTUALS.keys()))
+        elif negative_only:
+            one_type = random.choice(DEFAULT_NEGATIVE_CF_TYPES)
+        else:
+            one_type = random.choice(list(COUNTERFACTUAL_TYPES.keys()))
         selected_types = [one_type] * num_counterfactuals
     elif cf_types:
-        selected_types = [random.choice(cf_types) for _ in range(num_counterfactuals)]
+        pool = cf_types
+        if semantic_only:
+            pool = [t for t in cf_types if t in IMAGE_COUNTERFACTUALS] or cf_types
+        elif negative_only:
+            pool = [t for t in cf_types if t in NEGATIVE_COUNTERFACTUALS] or cf_types
+        selected_types = [random.choice(pool) for _ in range(num_counterfactuals)]
+    elif semantic_only:
+        pool = list(IMAGE_COUNTERFACTUALS.keys())
+        selected_types = [random.choice(pool) for _ in range(num_counterfactuals)]
+    elif negative_only:
+        pool = DEFAULT_NEGATIVE_CF_TYPES
+        selected_types = [random.choice(pool) for _ in range(num_counterfactuals)]
 
     if selected_types is not None:
         for cf_type in selected_types:
@@ -1160,69 +1060,111 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, same_c
                 'change_score': change_score,
                 'change_attempts': change_attempts,
             })
-    
-    # Default behavior (existing code)
+
     elif num_counterfactuals >= 2:
-        # One Image CF + One Negative CF
-        image_cf_type = random.choice(list(IMAGE_COUNTERFACTUALS.keys()))
-        image_cf_func = IMAGE_COUNTERFACTUALS[image_cf_type]
-        cf_scene, cf_desc, change_score, change_attempts = generate_one_with_min_change(
-            image_cf_func,
-            min_change_score=min_change_score,
-            max_attempts=max_cf_attempts
-        )
-        counterfactuals.append({
-            'scene': cf_scene,
-            'description': cf_desc,
-            'type': image_cf_type,
-            'cf_category': 'image_cf',
-            'change_score': change_score,
-            'change_attempts': change_attempts,
-        })
-        
-        neg_cf_type = random.choice(DEFAULT_NEGATIVE_CF_TYPES)
-        neg_cf_func = NEGATIVE_COUNTERFACTUALS[neg_cf_type]
-        cf_scene, cf_desc, change_score, change_attempts = generate_one_with_min_change(
-            neg_cf_func,
-            min_change_score=min_change_score,
-            max_attempts=max_cf_attempts
-        )
-        counterfactuals.append({
-            'scene': cf_scene,
-            'description': cf_desc,
-            'type': neg_cf_type,
-            'cf_category': 'negative_cf',
-            'change_score': change_score,
-            'change_attempts': change_attempts,
-        })
-        
-        # Add more if requested
-        remaining = num_counterfactuals - 2
-        if remaining > 0:
-            all_cf_types = list(COUNTERFACTUAL_TYPES.keys())
-            used_types = {image_cf_type, neg_cf_type}
-            available = [t for t in all_cf_types if t not in used_types and t != 'apply_fisheye']
-            
-            extra_types = random.sample(available, min(remaining, len(available)))
-            for cf_type in extra_types:
-                cf_func = COUNTERFACTUAL_TYPES[cf_type]
+        if semantic_only:
+            pool = list(IMAGE_COUNTERFACTUALS.keys())
+            for _ in range(num_counterfactuals):
+                cf_type = random.choice(pool)
+                cf_func = IMAGE_COUNTERFACTUALS[cf_type]
                 cf_scene, cf_desc, change_score, change_attempts = generate_one_with_min_change(
                     cf_func,
                     min_change_score=min_change_score,
                     max_attempts=max_cf_attempts
                 )
-                cf_category = 'image_cf' if cf_type in IMAGE_COUNTERFACTUALS else 'negative_cf'
                 counterfactuals.append({
                     'scene': cf_scene,
                     'description': cf_desc,
                     'type': cf_type,
-                    'cf_category': cf_category,
+                    'cf_category': 'image_cf',
                     'change_score': change_score,
                     'change_attempts': change_attempts,
                 })
+        elif negative_only:
+            pool = DEFAULT_NEGATIVE_CF_TYPES
+            for _ in range(num_counterfactuals):
+                cf_type = random.choice(pool)
+                cf_func = NEGATIVE_COUNTERFACTUALS[cf_type]
+                cf_scene, cf_desc, change_score, change_attempts = generate_one_with_min_change(
+                    cf_func,
+                    min_change_score=min_change_score,
+                    max_attempts=max_cf_attempts
+                )
+                counterfactuals.append({
+                    'scene': cf_scene,
+                    'description': cf_desc,
+                    'type': cf_type,
+                    'cf_category': 'negative_cf',
+                    'change_score': change_score,
+                    'change_attempts': change_attempts,
+                })
+        else:
+            image_cf_type = random.choice(list(IMAGE_COUNTERFACTUALS.keys()))
+            image_cf_func = IMAGE_COUNTERFACTUALS[image_cf_type]
+            cf_scene, cf_desc, change_score, change_attempts = generate_one_with_min_change(
+                image_cf_func,
+                min_change_score=min_change_score,
+                max_attempts=max_cf_attempts
+            )
+            counterfactuals.append({
+                'scene': cf_scene,
+                'description': cf_desc,
+                'type': image_cf_type,
+                'cf_category': 'image_cf',
+                'change_score': change_score,
+                'change_attempts': change_attempts,
+            })
+            
+            neg_cf_type = random.choice(DEFAULT_NEGATIVE_CF_TYPES)
+            neg_cf_func = NEGATIVE_COUNTERFACTUALS[neg_cf_type]
+            cf_scene, cf_desc, change_score, change_attempts = generate_one_with_min_change(
+                neg_cf_func,
+                min_change_score=min_change_score,
+                max_attempts=max_cf_attempts
+            )
+            counterfactuals.append({
+                'scene': cf_scene,
+                'description': cf_desc,
+                'type': neg_cf_type,
+                'cf_category': 'negative_cf',
+                'change_score': change_score,
+                'change_attempts': change_attempts,
+            })
+
+            remaining = num_counterfactuals - 2
+            if remaining > 0:
+                all_cf_types = list(COUNTERFACTUAL_TYPES.keys())
+                used_types = {image_cf_type, neg_cf_type}
+                available = [t for t in all_cf_types if t not in used_types and t != 'apply_fisheye']
+                
+                extra_types = random.sample(available, min(remaining, len(available)))
+                for cf_type in extra_types:
+                    cf_func = COUNTERFACTUAL_TYPES[cf_type]
+                    cf_scene, cf_desc, change_score, change_attempts = generate_one_with_min_change(
+                        cf_func,
+                        min_change_score=min_change_score,
+                        max_attempts=max_cf_attempts
+                    )
+                    cf_category = 'image_cf' if cf_type in IMAGE_COUNTERFACTUALS else 'negative_cf'
+                    counterfactuals.append({
+                        'scene': cf_scene,
+                        'description': cf_desc,
+                        'type': cf_type,
+                        'cf_category': cf_category,
+                        'change_score': change_score,
+                        'change_attempts': change_attempts,
+                    })
     
     elif num_counterfactuals == 1:
-        if random.random() < 0.5:
+        if semantic_only:
+            cf_type = random.choice(list(IMAGE_COUNTERFACTUALS.keys()))
+            cf_func = IMAGE_COUNTERFACTUALS[cf_type]
+            cf_category = 'image_cf'
+        elif negative_only:
+            cf_type = random.choice(DEFAULT_NEGATIVE_CF_TYPES)
+            cf_func = NEGATIVE_COUNTERFACTUALS[cf_type]
+            cf_category = 'negative_cf'
+        elif random.random() < 0.5:
             cf_type = random.choice(list(IMAGE_COUNTERFACTUALS.keys()))
             cf_func = IMAGE_COUNTERFACTUALS[cf_type]
             cf_category = 'image_cf'
@@ -1249,25 +1191,21 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, same_c
 
 def render_scene(blender_path, scene_file, output_image, use_gpu=0, samples=512, width=320, height=240):
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    current_dir = os.path.dirname(os.path.abspath(__file__))
     render_script = os.path.join(current_dir, 'scripts', 'render.py')
     render_script = os.path.normpath(render_script)
-    
-    # Get paths to data files
+
     base_scene = os.path.join(current_dir, 'data', 'base_scene.blend')
     properties_json = os.path.join(current_dir, 'data', 'properties.json')
     shape_dir = os.path.join(current_dir, 'data', 'shapes')
     material_dir = os.path.join(current_dir, 'data', 'materials')
-    
-    # Normalize all paths for Windows compatibility
+
     base_scene = os.path.normpath(base_scene)
     properties_json = os.path.normpath(properties_json)
     shape_dir = os.path.normpath(shape_dir)
     material_dir = os.path.normpath(material_dir)
     scene_file = os.path.normpath(scene_file)
     output_image = os.path.normpath(output_image)
-    
-    # Verify required files exist
+
     if not os.path.exists(base_scene):
         print(f"  ERROR: Base scene file not found: {base_scene}")
         return False
@@ -1277,13 +1215,11 @@ def render_scene(blender_path, scene_file, output_image, use_gpu=0, samples=512,
     if not os.path.exists(scene_file):
         print(f"  ERROR: Scene file not found: {scene_file}")
         return False
-    
-    # Ensure output directory exists
+
     output_dir = os.path.dirname(output_image)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
-    
-    # Use absolute path for output_image to avoid path mismatch issues
+
     output_image_abs = os.path.abspath(output_image)
     
     cmd = [
@@ -1302,8 +1238,7 @@ def render_scene(blender_path, scene_file, output_image, use_gpu=0, samples=512,
     
     env = os.environ.copy()
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    
-    # Apply filters using system Python (PIL might not be available in Blender's Python)
+
     if result.returncode == 0 and os.path.exists(output_image_abs):
         try:
             import json
@@ -1397,8 +1332,7 @@ def render_scene(blender_path, scene_file, output_image, use_gpu=0, samples=512,
                                 out_pixels[x, y] = (r, g, b)
                         
                         img = output
-                    
-                    # Apply noise if present (separate from filter_type)
+
                     if noise_level:
                         import random
                         noise_amounts = {'light': 10, 'medium': 25, 'heavy': 50}
@@ -1439,7 +1373,6 @@ def render_scene(blender_path, scene_file, output_image, use_gpu=0, samples=512,
             print(f"  Blender stderr (last 1000 chars):")
             print(result.stderr[-1000:])
         if result.stdout:
-            # Print all output for debugging
             print(f"  Blender stdout (last 1000 chars):")
             print(result.stdout[-1000:])
             error_lines = [line for line in result.stdout.split('\n') if 'ERROR' in line.upper() or 'Traceback' in line or 'Exception' in line or 'failed' in line.lower()]
@@ -1466,7 +1399,6 @@ def list_counterfactual_types():
     print("  change_position    - Move an object to a different location")
     print("  add_object         - Add a new random object")
     print("  swap_attribute     - Swap colors between two objects")
-    print("  occlusion_change   - Move object to partially hide another")
     print("  relational_flip    - Move object from left of X to right of X")
     print("  remove_object      - Remove a random object")
     print("  replace_object     - Replace an object with a different one")
@@ -1475,6 +1407,7 @@ def list_counterfactual_types():
     print("  change_background  - Change background/ground color")
     print("  change_lighting    - Change lighting conditions")
     print("  add_noise          - Add image noise/grain")
+    print("  occlusion_change   - Move object to partially hide another")
     print("  apply_fisheye      - Apply fisheye lens distortion")
     print("  apply_blur         - Apply Gaussian blur")
     print("  apply_vignette     - Apply vignette (edge darkening)")
@@ -1498,12 +1431,11 @@ def find_scene_files(scenes_dir):
     
     for scene_file in scene_files:
         basename = os.path.basename(scene_file)
-        # Parse: scene_0000_original.json or scene_0000_cf1.json
         parts = basename.replace('.json', '').split('_')
         if len(parts) >= 3:
             scene_num = int(parts[1])
-            variant = '_'.join(parts[2:])  # original, cf1, cf2, etc.
-            
+            variant = '_'.join(parts[2:])
+
             if scene_num not in scene_sets:
                 scene_sets[scene_num] = {}
             scene_sets[scene_num][variant] = scene_file
@@ -1512,14 +1444,12 @@ def find_scene_files(scenes_dir):
 
 def render_existing_scenes(args):
     import json
-    
-    # Determine run directory
+
     if args.run_dir:
         run_dir = args.run_dir
     elif args.run_name:
         run_dir = os.path.join(args.output_dir, args.run_name)
     elif args.auto_latest:
-        # Find latest run
         if not os.path.exists(args.output_dir):
             print(f"ERROR: Output directory does not exist: {args.output_dir}")
             return
@@ -1529,8 +1459,7 @@ def render_existing_scenes(args):
         if not subdirs:
             print(f"ERROR: No run directories found in {args.output_dir}")
             return
-        
-        # Sort by modification time
+
         dirs_with_time = [(d, os.path.getmtime(os.path.join(args.output_dir, d))) 
                          for d in subdirs]
         latest = max(dirs_with_time, key=lambda x: x[1])[0]
@@ -1550,18 +1479,15 @@ def render_existing_scenes(args):
     if not os.path.exists(scenes_dir):
         print(f"ERROR: Scenes directory does not exist: {scenes_dir}")
         return
-    
+
     os.makedirs(images_dir, exist_ok=True)
-    
-    # Find Blender
+
     blender_path = args.blender_path or find_blender()
     print(f"Using Blender: {blender_path}")
-    
-    # Create patched render script
+
     print("\nPreparing render scripts...")
     create_patched_render_script()
-    
-    # Find all scene files
+
     scene_sets = find_scene_files(scenes_dir)
     total_scenes = len(scene_sets)
     
@@ -1570,15 +1496,12 @@ def render_existing_scenes(args):
         return
     
     print(f"\nFound {total_scenes} scene sets to render")
-    
-    # Checkpoint file
+
     checkpoint_file = os.path.join(run_dir, 'render_checkpoint.json')
-    
-    # Check for resume
+
     completed_scenes = set()
     if args.resume:
         completed_scenes = load_checkpoint(checkpoint_file)
-        # Also check rendered images
         rendered_scenes = get_completed_scenes_from_folder(images_dir)
         completed_scenes.update(rendered_scenes)
         
@@ -1623,8 +1546,7 @@ def render_existing_scenes(args):
                 save_checkpoint(checkpoint_file, list(completed_scenes))
         
         print(f"  [OK] Rendered {render_success}/{total_to_render} images")
-    
-    # Update metadata
+
     metadata_path = os.path.join(run_dir, 'run_metadata.json')
     if os.path.exists(metadata_path):
         with open(metadata_path, 'r') as f:
@@ -1633,8 +1555,7 @@ def render_existing_scenes(args):
         metadata['rendered_timestamp'] = datetime.now().isoformat()
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
-    
-    # Summary
+
     print("\n" + "="*70)
     print("RENDERING COMPLETE")
     print("="*70)
@@ -1665,9 +1586,7 @@ def create_downloadable_archive(run_dir, output_zip_path=None):
     
     if output_zip_path is None:
         run_name = os.path.basename(run_dir)
-        # Save to workspace root for Hugging Face Spaces accessibility
         output_zip_path = os.path.join(os.path.dirname(os.path.dirname(run_dir)) if 'output' in run_dir else '.', f"{run_name}.zip")
-        # Ensure absolute path for clarity
         output_zip_path = os.path.abspath(output_zip_path)
     
     print(f"\n[ARCHIVE] Creating downloadable archive: {output_zip_path}")
@@ -1710,6 +1629,8 @@ def save_run_metadata(run_dir, args, successful_scenes, successful_renders):
             'width': args.width,
             'height': args.height,
             'cf_types': args.cf_types if args.cf_types else 'default (1 image + 1 negative)',
+            'semantic_only': getattr(args, 'semantic_only', False),
+            'negative_only': getattr(args, 'negative_only', False),
             'min_cf_change_score': args.min_cf_change_score,
             'max_cf_attempts': args.max_cf_attempts,
         },
@@ -1730,7 +1651,6 @@ def save_run_metadata(run_dir, args, successful_scenes, successful_renders):
 
 
 def regenerate_scene_sets(args):
-    """Regenerate specific scene sets in an existing run. Uses settings from run_metadata.json."""
     run_dir = os.path.join(args.output_dir, args.run_name)
     if not os.path.exists(run_dir):
         print(f"ERROR: Run directory does not exist: {run_dir}")
@@ -1809,7 +1729,9 @@ def regenerate_scene_sets(args):
             same_cf_type=meta_args.get('same_cf_type', False),
             min_change_score=min_cf_score,
             max_cf_attempts=max_cf_attempts,
-            min_noise_level=min_noise
+            min_noise_level=min_noise,
+            semantic_only=meta_args.get('semantic_only', False),
+            negative_only=meta_args.get('negative_only', False)
         )
         
         for idx, cf in enumerate(counterfactuals):
@@ -1874,7 +1796,10 @@ def regenerate_scene_sets(args):
         else:
             print("\nRegenerating questions CSV...")
             try:
-                generate_mapping_with_questions(run_dir, args.csv_name, generate_questions=True)
+                generate_mapping_with_questions(
+                    run_dir, args.csv_name, generate_questions=True,
+                    strict_question_validation=not getattr(args, 'no_strict_validation', False)
+                )
                 print(f"[OK] CSV saved to: {os.path.join(run_dir, args.csv_name)}")
             except Exception as e:
                 print(f"[ERROR] Questions: {e}")
@@ -1941,8 +1866,6 @@ def filter_same_answer_scenes(run_dir, csv_filename):
 
 
 def main():
-    # When run as a script, ensure we're in the project root
-    # Change to script directory so relative paths work
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
     
@@ -1983,17 +1906,19 @@ def main():
                        help='Automatically use the latest run in output_dir (for --render_only mode)')
     parser.add_argument('--cf_types', nargs='+', 
                    choices=[
-                       # Image CFs (should change answers)
                        'change_color', 'change_shape', 'change_size', 
                        'change_material', 'change_position', 
                        'add_object', 'remove_object', 'replace_object',
                        'swap_attribute', 'occlusion_change', 'relational_flip',
-                       # Negative CFs (should NOT change answers)
                        'change_background', 
                        'change_lighting', 'add_noise',
                        'apply_fisheye', 'apply_blur', 'apply_vignette', 'apply_chromatic_aberration'
                    ],
                    help='Specific counterfactual types to use (if not specified, uses default: 1 image CF + 1 negative CF)')
+    parser.add_argument('--semantic_only', action='store_true',
+                   help='Generate only Semantic/Image counterfactuals (e.g. Change Color, Add Object); no Negative CFs')
+    parser.add_argument('--negative_only', action='store_true',
+                   help='Generate only Negative counterfactuals (e.g. Change Lighting, Add Noise, Occlusion Change); no Semantic CFs')
     parser.add_argument('--same_cf_type', action='store_true',
                    help='Use the same counterfactual type for all variants (first in --cf_types, or one random type if --cf_types not set)')
     parser.add_argument('--min_cf_change_score', type=float, default=1.0,
@@ -2013,6 +1938,8 @@ def main():
                        help='After generating questions, remove scenes where CF1 or CF2 answer matches original (delete those rows and their image/scene files). Use with --generate_questions.')
     parser.add_argument('--csv_name', default='image_mapping_with_questions.csv',
                        help='Output CSV filename (default: image_mapping_with_questions.csv)')
+    parser.add_argument('--no_strict_validation', action='store_true',
+                       help='Disable strict question validation (Semantic-Valid / Negative-Valid); use legacy accept logic when generating questions CSV')
     parser.add_argument('--regenerate', nargs='+', type=int, metavar='N',
                        help='Regenerate specific scene sets by index (e.g. --regenerate 63 83 272). Requires --run_name. Uses settings from run_metadata.json.')
     
@@ -2036,8 +1963,7 @@ def main():
             return
         regenerate_scene_sets(args)
         return
-    
-    # Find Blender
+
     blender_path = args.blender_path or find_blender()
     print(f"Using Blender: {blender_path}")
     
@@ -2053,17 +1979,12 @@ def main():
     images_dir = os.path.join(run_dir, 'images')
     os.makedirs(scenes_dir, exist_ok=True)
     os.makedirs(images_dir, exist_ok=True)
-    
-    # Checkpoint file
+
     checkpoint_file = os.path.join(run_dir, 'checkpoint.json')
-    
-    # Check for resume
+
     completed_scenes = set()
     if args.resume:
-        # Check local checkpoint
         completed_scenes = load_checkpoint(checkpoint_file)
-        
-        # Also check rendered images
         rendered_scenes = get_completed_scenes_from_folder(images_dir)
         completed_scenes.update(rendered_scenes)
         
@@ -2074,7 +1995,7 @@ def main():
             print(f"   Remaining: {args.num_scenes - len(completed_scenes)}")
         else:
             print("\n[WARNING] Resume flag set but no checkpoint found, starting fresh")
-    
+
     print("\n" + "="*70)
     print(f"GENERATING {args.num_scenes} SCENE SETS")
     print(f"Each with {args.num_counterfactuals} counterfactual variants")
@@ -2085,7 +2006,6 @@ def main():
     successful_renders = 0
     
     for i in range(args.num_scenes):
-        # Skip if already completed
         if i in completed_scenes:
             print(f"\n[SKIP] Skipping scene {i} (already completed)")
             successful_scenes += 1
@@ -2122,7 +2042,9 @@ def main():
             same_cf_type=args.same_cf_type,
             min_change_score=args.min_cf_change_score,
             max_cf_attempts=args.max_cf_attempts,
-            min_noise_level=args.min_noise_level
+            min_noise_level=args.min_noise_level,
+            semantic_only=args.semantic_only,
+            negative_only=args.negative_only
         )
         
         for idx, cf in enumerate(counterfactuals):
@@ -2235,7 +2157,8 @@ def main():
                 generate_mapping_with_questions(
                     run_dir,
                     args.csv_name,
-                    generate_questions=True
+                    generate_questions=True,
+                    strict_question_validation=not getattr(args, 'no_strict_validation', False)
                 )
                 print(f"\n[OK] CSV saved to: {os.path.join(run_dir, args.csv_name)}")
                 if getattr(args, 'filter_same_answer', False):

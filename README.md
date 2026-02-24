@@ -190,20 +190,18 @@ python3 pipeline.py --num_scenes 10 --min_cf_change_score 1.5 --max_cf_attempts 
 
 The pipeline supports 17 different counterfactual types, divided into two categories:
 
-**Image Counterfactuals** (Should change VQA answers - 9 types):
+**Image Counterfactuals** (Should change VQA answers - 8 types):
 - `change_color` - Change the color of a random object (e.g., red → blue)
 - `change_shape` - Change the shape of a random object (cube/sphere/cylinder)
 - `change_size` - Change the size of a random object (small ↔ large)
 - `change_material` - Change the material of a random object (metal ↔ rubber)
 - `change_position` - Move a random object to a different location (with collision detection)
-- `change_count` - Add or remove objects from the scene
 - `add_object` - Add a new random object to the scene
 - `remove_object` - Remove a random object from the scene
 - `replace_object` - Replace an object with a different one (keeping position)
 
-**Negative Counterfactuals** (Should NOT change VQA answers - 8 types):
+**Negative Counterfactuals** (Should NOT change VQA answers - 7 types):
 - `change_background` - Change the background/ground color
-- `change_texture` - Change texture style for all objects (metal ↔ rubber)
 - `change_lighting` - Change lighting conditions (bright/dim/warm/cool/dramatic)
 - `add_noise` - Add image noise/grain (light/medium/heavy levels)
 - `apply_fisheye` - Apply fisheye lens distortion effect
@@ -281,6 +279,32 @@ python scripts/generate_questions_mapping.py --output_dir output --auto_latest -
 # Also generate a long-format QA dataset (includes correct answer labels/ids)
 python scripts/generate_questions_mapping.py --output_dir output --auto_latest --generate_questions --long_format --long_csv_name qa_dataset.csv
 ```
+
+#### Ensuring counterfactual answers differ
+
+For evaluation and datasets, the **counterfactual image’s answer to its counterfactual question** should differ from the **original image’s answer to the original question**. The pipeline does this in two ways:
+
+1. **Automatic retries**  
+   When generating questions (with `--generate_questions`), the script retries up to **`MAX_CF_ANSWER_RETRIES`** (default 50) per scene. For each attempt it picks new counterfactual questions (with different randomness). It keeps a pair only when both CF1 and CF2 answers differ from the original answer (after normalizing, e.g. case and whitespace). If after all retries they still match, the scene is still included and a warning is printed.
+
+2. **CF-specific question templates**  
+   Counterfactual questions are chosen from templates that target the **changed** attribute or count, so the answer on the counterfactual image is different by design:
+   - **Count-changing CFs** (e.g. `add_object`, `remove_object`): questions like “How many objects are in the scene?” or “Are there more than N objects?” so the count/yes-no differs.
+   - **Attribute-changing CFs** (e.g. `change_color`, `change_shape`): questions about the **new** value (e.g. “How many red objects?” when an object was changed to red), so the count on the CF image differs from the original.
+
+**What you need to do:**
+
+- Run question generation **after** scenes and images exist (either as part of the pipeline with `--generate_questions`, or later on a run directory):
+
+  ```bash
+  # As part of a full run (ensures answers differ for that run’s scenes)
+  python pipeline.py --num_scenes 10 --num_objects 5 --run_name my_run --generate_questions
+
+  # Or later, on an existing run
+  python scripts/generate_questions_mapping.py --output_dir output/my_run --generate_questions
+  ```
+
+- **Optional:** To allow more attempts per scene, edit `scripts/generate_questions_mapping.py` and increase **`MAX_CF_ANSWER_RETRIES`** (e.g. from 50 to 100). No CLI flag is exposed for this.
 
 
 ## Project Structure

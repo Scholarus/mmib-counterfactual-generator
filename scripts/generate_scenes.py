@@ -53,9 +53,9 @@ def main():
                    choices=[
                        'change_color', 'change_shape', 'change_size', 
                        'change_material', 'change_position', 
-                       'change_count', 'add_object', 'remove_object',
+                       'add_object', 'remove_object', 'swap_attribute', 'occlusion_change', 'relational_flip',
                        'replace_object',
-                       'change_background', 'change_texture', 
+                       'change_background', 
                        'change_lighting', 'add_noise',
                        'apply_fisheye', 'apply_blur', 'apply_vignette', 'apply_chromatic_aberration'
                    ],

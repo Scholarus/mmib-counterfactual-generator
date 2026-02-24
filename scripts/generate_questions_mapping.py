@@ -1,5 +1,3 @@
-
-
 import os
 import argparse
 import csv
@@ -73,18 +71,27 @@ def get_scene_properties(scene):
 
 IMAGE_CF_TYPES = {
     'change_color', 'change_shape', 'change_size', 'change_material',
-    'change_position', 'change_count', 'add_object', 'remove_object', 'replace_object'
+    'change_position', 'add_object', 'remove_object', 'replace_object',
+    'swap_attribute', 'occlusion_change', 'relational_flip'
 }
 NEGATIVE_CF_TYPES = {
-    'change_background', 'change_texture', 'change_lighting', 'add_noise',
+    'change_background', 'change_lighting', 'add_noise',
     'apply_fisheye', 'apply_blur', 'apply_vignette', 'apply_chromatic_aberration'
 }
+
+MAX_CF_ANSWER_RETRIES = 150
 
 def get_cf_type_from_scene(scene):
     meta = scene.get('cf_metadata') or {}
     if not meta.get('is_counterfactual'):
         return None
     return meta.get('cf_type')
+
+def get_cf_description_from_scene(scene):
+    meta = scene.get('cf_metadata') or {}
+    if not meta.get('is_counterfactual'):
+        return None
+    return meta.get('cf_description')
 
 def get_change_details(original_scene, cf_scene):
     orig_objs = original_scene.get('objects', [])
@@ -100,12 +107,101 @@ def get_change_details(original_scene, cf_scene):
                 return {'attribute': attr, 'orig_val': ov or 'unknown', 'cf_val': cv or 'unknown', 'object_index': i}
     return None
 
-def generate_question_for_counterfactual(cf_type, original_scene, cf_scene):
+CF_COUNT_QUESTION_TEMPLATES = [
+    "How many objects are in the scene?",
+    "What is the total number of objects in the scene?",
+]
+CF_COLOR_QUESTION_TEMPLATES = [
+    ("How many {val} objects are there?", 'color'),
+    ("Are there any {val} objects?", 'color'),
+    ("What is the total number of {val} objects?", 'color'),
+]
+CF_SHAPE_QUESTION_TEMPLATES = [
+    ("How many {val} are there?", 'shape'),
+    ("Are there any {val}?", 'shape'),
+    ("What is the total number of {val}?", 'shape'),
+]
+CF_MATERIAL_QUESTION_TEMPLATES = [
+    ("How many {val} objects are there?", 'material'),
+    ("Are there any {val} objects?", 'material'),
+    ("What is the total number of {val} objects?", 'material'),
+]
+CF_SIZE_QUESTION_TEMPLATES = [
+    ("How many {val} objects are there?", 'size'),
+    ("Are there any {val} objects?", 'size'),
+    ("What is the total number of {val} objects?", 'size'),
+]
+
+
+def _pluralize_shape(shape):
+    if not shape:
+        return shape
+    s = shape.strip().lower()
+    if s.endswith('s'):
+        return s
+    return s + 's'
+
+
+def _count_by_attribute(objects, attr):
+    """Count objects per attribute value (color, shape, material, size)."""
+    counts = {}
+    for obj in objects:
+        val = (obj.get(attr) or '').lower().strip()
+        if val:
+            counts[val] = counts.get(val, 0) + 1
+    return counts
+
+
+def _get_attributes_with_different_counts(original_scene, cf_scene):
+    """Find attribute values whose count differs between original and CF scene."""
+    orig_objs = original_scene.get('objects', [])
+    cf_objs = cf_scene.get('objects', [])
+    differing = []
+    for attr in ['color', 'shape', 'material', 'size']:
+        orig_counts = _count_by_attribute(orig_objs, attr)
+        cf_counts = _count_by_attribute(cf_objs, attr)
+        all_vals = set(orig_counts) | set(cf_counts)
+        for val in all_vals:
+            o = orig_counts.get(val, 0)
+            c = cf_counts.get(val, 0)
+            if o != c:
+                differing.append((attr, val, o, c))
+    return differing
+
+
+def generate_question_for_counterfactual(cf_type, original_scene, cf_scene, retry_index=0):
+    """Generate a question tailored to cf_type. Use retry_index to vary question on retries."""
+    random.seed(hash((str(cf_type), retry_index, str(id(original_scene)), str(id(cf_scene)))))
     change = get_change_details(original_scene, cf_scene)
     orig_objs = original_scene.get('objects', [])
     cf_objs = cf_scene.get('objects', [])
     props_orig = get_scene_properties(original_scene)
     props_cf = get_scene_properties(cf_scene)
+
+    # For IMAGE CFs: prefer questions targeting attributes that differ between orig and cf
+    if cf_type and cf_type in IMAGE_CF_TYPES:
+        differing = _get_attributes_with_different_counts(original_scene, cf_scene)
+        if differing:
+            idx = retry_index % len(differing) if differing else 0
+            attr, val, orig_count, cf_count = differing[idx]
+            if attr == 'color':
+                template, _ = random.choice(CF_COLOR_QUESTION_TEMPLATES)
+                question = template.format(val=val)
+            elif attr == 'shape':
+                plural = _pluralize_shape(val)
+                template, _ = random.choice(CF_SHAPE_QUESTION_TEMPLATES)
+                question = template.format(val=plural)
+            elif attr == 'material':
+                template, _ = random.choice(CF_MATERIAL_QUESTION_TEMPLATES)
+                question = template.format(val=val)
+            elif attr == 'size':
+                template, _ = random.choice(CF_SIZE_QUESTION_TEMPLATES)
+                question = template.format(val=val)
+            else:
+                question = None
+            if question:
+                return question, {attr: val.rstrip('s') if attr == 'shape' else val}
+
     if cf_type and cf_type in NEGATIVE_CF_TYPES:
         templates = [
             ("How many objects are in the scene?", {}),
@@ -123,57 +219,91 @@ def generate_question_for_counterfactual(cf_type, original_scene, cf_scene):
         return question, params
 
     if change and change.get('attribute') == 'count':
-        question = "How many objects are in the scene?"
-        return question, {}
+        orig_count = change.get('orig_count', len(orig_objs))
+        cf_count = change.get('cf_count', len(cf_objs))
+        templates_with_params = []
+        templates_with_params.append((random.choice(CF_COUNT_QUESTION_TEMPLATES), {}))
+        if cf_count > orig_count:
+            templates_with_params.append((f"Are there more than {orig_count} objects?", {}))
+            templates_with_params.append((f"Are there at least {cf_count} objects?", {}))
+        if cf_count < orig_count:
+            templates_with_params.append((f"Are there fewer than {orig_count} objects?", {}))
+            templates_with_params.append((f"Are there more than {cf_count} objects?", {}))
+        template, params = random.choice(templates_with_params)
+        return template, params
 
     if change and change.get('attribute') in ('color', 'shape', 'material', 'size'):
         attr = change['attribute']
-        orig_val = change.get('orig_val', '')
-        cf_val = change.get('cf_val', '')
+        cf_val = (change.get('cf_val') or '').strip().lower()
+        if not cf_val:
+            cf_val = 'unknown'
+        params = {attr: cf_val}
         if attr == 'color':
-            question = f"How many {cf_val} objects are there?"
-            params = {'color': cf_val}
+            template, _ = random.choice(CF_COLOR_QUESTION_TEMPLATES)
+            question = template.format(val=cf_val)
         elif attr == 'shape':
-            question = f"How many {cf_val}s are there?" if not cf_val.endswith('s') else f"How many {cf_val} are there?"
-            params = {'shape': cf_val.rstrip('s')}
+            template, _ = random.choice(CF_SHAPE_QUESTION_TEMPLATES)
+            plural = _pluralize_shape(cf_val)
+            question = template.format(val=plural)
+            params['shape'] = cf_val.rstrip('s')
         elif attr == 'material':
-            question = f"How many {cf_val} objects are there?"
-            params = {'material': cf_val}
+            template, _ = random.choice(CF_MATERIAL_QUESTION_TEMPLATES)
+            question = template.format(val=cf_val)
         elif attr == 'size':
-            question = f"How many {cf_val} objects are there?"
-            params = {'size': cf_val}
+            template, _ = random.choice(CF_SIZE_QUESTION_TEMPLATES)
+            question = template.format(val=cf_val)
         else:
             question = "How many objects are in the scene?"
             params = {}
         return question, params
 
+    if cf_type in ('add_object', 'remove_object'):
+        templates = list(CF_COUNT_QUESTION_TEMPLATES)
+        if len(orig_objs) != len(cf_objs):
+            if len(cf_objs) > len(orig_objs):
+                templates.extend([f"Are there more than {len(orig_objs)} objects?", f"Are there at least {len(cf_objs)} objects?"])
+            else:
+                templates.extend([f"Are there fewer than {len(orig_objs)} objects?", f"Are there more than {len(cf_objs)} objects?"])
+        template = random.choice(templates)
+        return template, {}
+
     if cf_type in ('change_color', 'change_shape', 'replace_object'):
         for attr, key in [('color', 'colors'), ('shape', 'shapes'), ('material', 'materials'), ('size', 'sizes')]:
-            vals = props_cf.get(key) or props_orig.get(key) or []
+            vals = list(props_cf.get(key) or props_orig.get(key) or [])
             if vals:
-                val = random.choice(list(vals))
+                val = random.choice(vals)
                 if attr == 'shape':
-                    plural = val + 's' if not val.endswith('s') else val
-                    question = f"How many {plural} are there?"
+                    plural = _pluralize_shape(val)
+                    templates = CF_SHAPE_QUESTION_TEMPLATES
+                    template, _ = random.choice(templates)
+                    question = template.format(val=plural)
                 elif attr == 'color':
-                    question = f"How many {val} objects are there?"
+                    template, _ = random.choice(CF_COLOR_QUESTION_TEMPLATES)
+                    question = template.format(val=val)
                 elif attr == 'material':
-                    question = f"How many {val} objects are there?"
+                    template, _ = random.choice(CF_MATERIAL_QUESTION_TEMPLATES)
+                    question = template.format(val=val)
                 else:
-                    question = f"How many {val} objects are there?"
-                return question, {attr: val}
-    if cf_type in ('change_count', 'add_object', 'remove_object'):
-        return "How many objects are in the scene?", {}
-    if cf_type in ('change_size', 'change_material', 'change_position'):
+                    template, _ = random.choice(CF_SIZE_QUESTION_TEMPLATES)
+                    question = template.format(val=val)
+                return question, {attr: val.rstrip('s') if attr == 'shape' else val}
+
+    if cf_type in ('change_size', 'change_material', 'change_position', 'swap_attribute', 'occlusion_change', 'relational_flip'):
         key = 'sizes' if cf_type == 'change_size' else ('materials' if cf_type == 'change_material' else 'colors')
         attr = key.rstrip('s')
-        vals = props_cf.get(key) or props_orig.get(key) or []
+        vals = list(props_cf.get(key) or props_orig.get(key) or [])
         if vals:
-            val = random.choice(list(vals))
-            question = f"How many {val} objects are there?"
+            val = random.choice(vals)
+            if cf_type == 'change_size':
+                template, _ = random.choice(CF_SIZE_QUESTION_TEMPLATES)
+            elif cf_type == 'change_material':
+                template, _ = random.choice(CF_MATERIAL_QUESTION_TEMPLATES)
+            else:
+                template, _ = random.choice(CF_COLOR_QUESTION_TEMPLATES)
+            question = template.format(val=val)
             return question, {attr: val}
 
-    question = "How many objects are in the scene?"
+    question = random.choice(CF_COUNT_QUESTION_TEMPLATES)
     return question, {}
 
 def generate_question_for_scene(scene_file):
@@ -502,8 +632,6 @@ def create_counterfactual_questions(original_question, params, scene):
             if cf_q is None:
                 cf_q = "How many objects are in the scene?"
                 cf_params = {}
-            
-            # Ensure cf_params is set
             if not cf_params:
                 cf_params = {}
             
@@ -545,9 +673,22 @@ def create_counterfactual_questions(original_question, params, scene):
     
     return cf_questions
 
+def normalize_answer(a):
+    if a is None:
+        return ""
+    return str(a).strip().lower()
+
+
 def answer_question_for_scene(question, scene):
     objects = scene.get('objects', [])
     question_lower = question.lower()
+    
+    if "at least" in question_lower:
+        match = re.search(r'at least (\d+)', question_lower)
+        if match:
+            threshold = int(match.group(1))
+            count = count_matching_objects(question_lower, objects)
+            return "yes" if count >= threshold else "no"
     
     if "more than" in question_lower:
         match = re.search(r'more than (\d+)', question_lower)
@@ -774,7 +915,9 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
     if with_links:
         header = ['scene_id', 'original_image_link', 'original_scene_link',
                   'counterfactual1_image_link', 'counterfactual1_scene_link', 
-                  'counterfactual2_image_link', 'counterfactual2_scene_link']
+                  'counterfactual2_image_link', 'counterfactual2_scene_link',
+                  'counterfactual1_type', 'counterfactual2_type',
+                  'counterfactual1_description', 'counterfactual2_description']
         if generate_questions:
             header.extend([
                 'original_question', 'counterfactual1_question', 'counterfactual2_question',
@@ -793,6 +936,8 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
     elif generate_questions:
         rows.append([
             'original_image', 'counterfactual1_image', 'counterfactual2_image',
+            'counterfactual1_type', 'counterfactual2_type',
+            'counterfactual1_description', 'counterfactual2_description',
             'original_question', 'counterfactual1_question', 'counterfactual2_question',
             'original_question_difficulty', 'counterfactual1_question_difficulty', 'counterfactual2_question_difficulty',
             'original_image_answer_to_original_question', 
@@ -806,7 +951,9 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
             'cf2_image_answer_to_cf2_question'
         ])
     else:
-        rows.append(['original_image', 'counterfactual1_image', 'counterfactual2_image'])
+        rows.append(['original_image', 'counterfactual1_image', 'counterfactual2_image',
+                    'counterfactual1_type', 'counterfactual2_type',
+                    'counterfactual1_description', 'counterfactual2_description'])
     
     total_scenes = len(scene_sets)
     
@@ -841,47 +988,75 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
             
             try:
                 original_question, params = generate_question_for_scene(original_scene_file)
+                original_ans_orig_q = answer_question_for_scene(original_question, original_scene)
                 cf1_type = get_cf_type_from_scene(cf1_scene)
                 cf2_type = get_cf_type_from_scene(cf2_scene)
-                cf_questions = create_counterfactual_questions(original_question, params, original_scene) if (not cf1_type or not cf2_type) else None
-                if cf1_type:
-                    cf1_question, cf1_params = generate_question_for_counterfactual(cf1_type, original_scene, cf1_scene)
-                else:
-                    cf1_question, cf1_params = cf_questions[0] if cf_questions and len(cf_questions) > 0 else ("How many objects are in the scene?", {})
-                if cf2_type:
-                    cf2_question, cf2_params = generate_question_for_counterfactual(cf2_type, original_scene, cf2_scene)
-                else:
-                    cf2_question, cf2_params = cf_questions[1] if cf_questions and len(cf_questions) > 1 else (cf_questions[0] if cf_questions else ("How many objects are in the scene?", {}))
+                cf1_description = get_cf_description_from_scene(cf1_scene)
+                cf2_description = get_cf_description_from_scene(cf2_scene)
             except Exception as e:
                 import traceback
                 traceback.print_exc()
                 continue
             
-            try:
-                original_difficulty = calculate_question_difficulty(original_question, params)
-                cf1_difficulty = calculate_question_difficulty(cf1_question, cf1_params)
-                cf2_difficulty = calculate_question_difficulty(cf2_question, cf2_params)
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                continue
+            cf1_question = cf2_question = None
+            cf1_params = cf2_params = {}
+            original_difficulty = cf1_difficulty = cf2_difficulty = None
+            original_ans_cf1_q = original_ans_cf2_q = None
+            cf1_ans_orig_q = cf1_ans_cf1_q = cf1_ans_cf2_q = None
+            cf2_ans_orig_q = cf2_ans_cf1_q = cf2_ans_cf2_q = None
+            orig_norm = normalize_answer(original_ans_orig_q)
             
-            try:
-                original_ans_orig_q = answer_question_for_scene(original_question, original_scene)
-                original_ans_cf1_q = answer_question_for_scene(cf1_question, original_scene)
-                original_ans_cf2_q = answer_question_for_scene(cf2_question, original_scene)
+            for cf_retry in range(MAX_CF_ANSWER_RETRIES):
+                try:
+                    random.seed(hash((scene_num, idx, cf_retry)))
+                    cf_questions = create_counterfactual_questions(original_question, params, original_scene) if (not cf1_type or not cf2_type) else None
+                    if cf1_type:
+                        cf1_question, cf1_params = generate_question_for_counterfactual(cf1_type, original_scene, cf1_scene, retry_index=cf_retry)
+                    else:
+                        cf1_question, cf1_params = cf_questions[0] if cf_questions and len(cf_questions) > 0 else ("How many objects are in the scene?", {})
+                    if cf2_type:
+                        cf2_question, cf2_params = generate_question_for_counterfactual(cf2_type, original_scene, cf2_scene, retry_index=cf_retry)
+                    else:
+                        cf2_question, cf2_params = cf_questions[1] if cf_questions and len(cf_questions) > 1 else (cf_questions[0] if cf_questions else ("How many objects are in the scene?", {}))
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    continue
                 
-                cf1_ans_orig_q = answer_question_for_scene(original_question, cf1_scene)
-                cf1_ans_cf1_q = answer_question_for_scene(cf1_question, cf1_scene)
-                cf1_ans_cf2_q = answer_question_for_scene(cf2_question, cf1_scene)
+                try:
+                    original_difficulty = calculate_question_difficulty(original_question, params)
+                    cf1_difficulty = calculate_question_difficulty(cf1_question, cf1_params)
+                    cf2_difficulty = calculate_question_difficulty(cf2_question, cf2_params)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    continue
                 
-                cf2_ans_orig_q = answer_question_for_scene(original_question, cf2_scene)
-                cf2_ans_cf1_q = answer_question_for_scene(cf1_question, cf2_scene)
-                cf2_ans_cf2_q = answer_question_for_scene(cf2_question, cf2_scene)
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                continue
+                try:
+                    original_ans_cf1_q = answer_question_for_scene(cf1_question, original_scene)
+                    original_ans_cf2_q = answer_question_for_scene(cf2_question, original_scene)
+                    cf1_ans_orig_q = answer_question_for_scene(original_question, cf1_scene)
+                    cf1_ans_cf1_q = answer_question_for_scene(cf1_question, cf1_scene)
+                    cf1_ans_cf2_q = answer_question_for_scene(cf2_question, cf1_scene)
+                    cf2_ans_orig_q = answer_question_for_scene(original_question, cf2_scene)
+                    cf2_ans_cf1_q = answer_question_for_scene(cf1_question, cf2_scene)
+                    cf2_ans_cf2_q = answer_question_for_scene(cf2_question, cf2_scene)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    continue
+                
+                # For image CFs: ensure CF image's answer to CF question differs from original image's answer to same question.
+                # change_position, occlusion_change, relational_flip only move objects.
+                # swap_attribute swaps colors (same net counts). Our QA cannot distinguish, so skip validation.
+                CF_TYPES_ACCEPT_WITHOUT_CHECK = {'change_position', 'swap_attribute', 'occlusion_change', 'relational_flip'}
+                cf1_differs = (cf1_type not in IMAGE_CF_TYPES) or (cf1_type in CF_TYPES_ACCEPT_WITHOUT_CHECK) or (normalize_answer(original_ans_cf1_q) != normalize_answer(cf1_ans_cf1_q))
+                cf2_differs = (cf2_type not in IMAGE_CF_TYPES) or (cf2_type in CF_TYPES_ACCEPT_WITHOUT_CHECK) or (normalize_answer(original_ans_cf2_q) != normalize_answer(cf2_ans_cf2_q))
+                # Accept when at least one CF has different answers (maximize usable data; the other may have same answer due to count-preserving swaps)
+                if cf1_differs or cf2_differs:
+                    break
+            else:
+                print(f"WARNING: Scene {scene_num}: could not find questions with different answers for both CFs after {MAX_CF_ANSWER_RETRIES} retries (scene included with best-effort questions)")
             
             try:
                 if with_links:
@@ -903,6 +1078,7 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
                         original_image_link, original_scene_link,
                         cf1_image_link, cf1_scene_link,
                         cf2_image_link, cf2_scene_link,
+                        cf1_type, cf2_type, cf1_description, cf2_description,
                         original_question, cf1_question, cf2_question,
                         original_difficulty, cf1_difficulty, cf2_difficulty,
                         original_ans_orig_q, original_ans_cf1_q, original_ans_cf2_q,
@@ -912,6 +1088,7 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
                 else:
                     rows.append([
                         original_id, cf1_id, cf2_id,
+                        cf1_type, cf2_type, cf1_description, cf2_description,
                         original_question, cf1_question, cf2_question,
                         original_difficulty, cf1_difficulty, cf2_difficulty,
                         original_ans_orig_q, original_ans_cf1_q, original_ans_cf2_q,
@@ -923,6 +1100,20 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
                 traceback.print_exc()
                 continue
         else:
+            # Load CF scene files to get cf_type and cf_description for the mapping
+            cf1_type = cf2_type = cf1_description = cf2_description = ''
+            cf1_scene_file = find_scene_file(scenes_dir, cf1_id)
+            cf2_scene_file = find_scene_file(scenes_dir, cf2_id)
+            if cf1_scene_file and cf2_scene_file:
+                try:
+                    cf1_scene = load_scene(cf1_scene_file)
+                    cf2_scene = load_scene(cf2_scene_file)
+                    cf1_type = get_cf_type_from_scene(cf1_scene) or ''
+                    cf2_type = get_cf_type_from_scene(cf2_scene) or ''
+                    cf1_description = get_cf_description_from_scene(cf1_scene) or ''
+                    cf2_description = get_cf_description_from_scene(cf2_scene) or ''
+                except Exception:
+                    pass
             if with_links:
                 def make_link(filename, file_type='image'):
                     if base_url:
@@ -941,10 +1132,11 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
                     scene_num,
                     original_image_link, original_scene_link,
                     cf1_image_link, cf1_scene_link,
-                    cf2_image_link, cf2_scene_link
+                    cf2_image_link, cf2_scene_link,
+                    cf1_type, cf2_type, cf1_description, cf2_description
                 ])
             else:
-                rows.append([original_id, cf1_id, cf2_id])
+                rows.append([original_id, cf1_id, cf2_id, cf1_type, cf2_type, cf1_description, cf2_description])
     
     csv_path = os.path.join(run_dir, csv_filename)
     try:
@@ -966,44 +1158,29 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
             if generate_questions:
                 print(f"  Scene ID: {row[0]}")
                 print(f"  Links:")
-                print(f"    Original image: {row[1]}")
-                print(f"    Original scene: {row[2]}")
-                print(f"    CF1 image: {row[3]}")
-                print(f"    CF1 scene: {row[4]}")
-                print(f"    CF2 image: {row[5]}")
-                print(f"    CF2 scene: {row[6]}")
-                print(f"  Questions:")
-                print(f"    Original: {row[7]}")
-                print(f"    CF1: {row[8]}")
-                print(f"    CF2: {row[9]}")
+                print(f"    Original image: {row[1]}, scene: {row[2]}")
+                print(f"    CF1 image: {row[3]}, scene: {row[4]}")
+                print(f"    CF2 image: {row[5]}, scene: {row[6]}")
+                print(f"  CF type / description: CF1 type={row[7]}, CF2 type={row[8]}; CF1 desc={row[9]!r}, CF2 desc={row[10]!r}")
+                print(f"  Questions: Original: {row[11]}, CF1: {row[12]}, CF2: {row[13]}")
             else:
                 print(f"  Scene ID: {row[0]}")
                 print(f"  Links:")
                 print(f"    Original image: {row[1]}, scene: {row[2]}")
                 print(f"    CF1 image: {row[3]}, scene: {row[4]}")
                 print(f"    CF2 image: {row[5]}, scene: {row[6]}")
-        elif generate_questions and len(row) > 6:
-            print(f"  Images:")
-            print(f"    Original: {row[0]}")
-            print(f"    Counterfactual 1: {row[1]}")
-            print(f"    Counterfactual 2: {row[2]}")
-            print(f"  Questions:")
-            print(f"    Original question: {row[3]}")
-            print(f"    CF1 question: {row[4]}")
-            print(f"    CF2 question: {row[5]}")
+                print(f"  CF type / description: CF1 type={row[7]}, CF2 type={row[8]}; CF1 desc={row[9]!r}, CF2 desc={row[10]!r}")
+        elif generate_questions and len(row) > 14:
+            print(f"  Images: Original: {row[0]}, CF1: {row[1]}, CF2: {row[2]}")
+            print(f"  CF type / description: CF1 type={row[3]}, CF2 type={row[4]}; CF1 desc={row[5]!r}, CF2 desc={row[6]!r}")
+            print(f"  Questions: Original: {row[7]}, CF1: {row[8]}, CF2: {row[9]}")
             print(f"  Answer Matrix (scene × question):")
-            print(f"    Original image:")
-            print(f"      -> Original Q: {row[6]}")
-            print(f"      -> CF1 Q: {row[7]}")
-            print(f"      -> CF2 Q: {row[8]}")
-            print(f"    CF1 image:")
-            print(f"      -> Original Q: {row[9]}")
-            print(f"      -> CF1 Q: {row[10]}")
-            print(f"      -> CF2 Q: {row[11]}")
-            print(f"    CF2 image:")
-            print(f"      -> Original Q: {row[12]}")
-            print(f"      -> CF1 Q: {row[13]}")
-            print(f"      -> CF2 Q: {row[14]}")
+            print(f"    Original image -> Orig Q: {row[10]}, CF1 Q: {row[11]}, CF2 Q: {row[12]}")
+            print(f"    CF1 image -> Orig Q: {row[13]}, CF1 Q: {row[14]}, CF2 Q: {row[15]}")
+            print(f"    CF2 image -> Orig Q: {row[16]}, CF1 Q: {row[17]}, CF2 Q: {row[18]}")
+        elif len(row) >= 7:
+            print(f"  Images: Original: {row[0]}, CF1: {row[1]}, CF2: {row[2]}")
+            print(f"  CF type / description: CF1 type={row[3]}, CF2 type={row[4]}; CF1 desc={row[5]!r}, CF2 desc={row[6]!r}")
 
 def main():
     parser = argparse.ArgumentParser(

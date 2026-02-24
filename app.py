@@ -618,20 +618,21 @@ def main():
             value=False,
             help="Use the same counterfactual type for every variant (first selected type, or one random if none selected)"
         )
-        with st.expander("Image CFs (change answers)", expanded=False):
+        with st.expander("Image CFs (change answers)", expanded=True):
             use_change_color = st.checkbox("Change Color", value=False)
             use_change_shape = st.checkbox("Change Shape", value=False)
             use_change_size = st.checkbox("Change Size", value=False)
             use_change_material = st.checkbox("Change Material", value=False)
             use_change_position = st.checkbox("Change Position", value=False)
-            use_change_count = st.checkbox("Change Count", value=False)
             use_add_object = st.checkbox("Add Object", value=False)
             use_remove_object = st.checkbox("Remove Object", value=False)
             use_replace_object = st.checkbox("Replace Object", value=False)
+            use_swap_attribute = st.checkbox("Swap Attribute", value=False)
+            use_occlusion_change = st.checkbox("Occlusion Change", value=False)
+            use_relational_flip = st.checkbox("Relational Flip", value=False)
         
         with st.expander("Negative CFs (don't change answers)", expanded=False):
             use_change_background = st.checkbox("Change Background", value=False)
-            use_change_texture = st.checkbox("Change Texture", value=False)
             use_change_lighting = st.checkbox("Change Lighting", value=False)
             use_add_noise = st.checkbox("Add Noise", value=False)
             use_apply_fisheye = st.checkbox("Apply Fisheye", value=False)
@@ -713,18 +714,20 @@ def main():
             cf_types.append('change_material')
         if use_change_position:
             cf_types.append('change_position')
-        if use_change_count:
-            cf_types.append('change_count')
         if use_add_object:
             cf_types.append('add_object')
         if use_remove_object:
             cf_types.append('remove_object')
         if use_replace_object:
             cf_types.append('replace_object')
+        if use_swap_attribute:
+            cf_types.append('swap_attribute')
+        if use_occlusion_change:
+            cf_types.append('occlusion_change')
+        if use_relational_flip:
+            cf_types.append('relational_flip')
         if use_change_background:
             cf_types.append('change_background')
-        if use_change_texture:
-            cf_types.append('change_texture')
         if use_change_lighting:
             cf_types.append('change_lighting')
         if use_add_noise:

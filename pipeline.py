@@ -4,6 +4,7 @@ import json
 import argparse
 import os
 import subprocess
+import csv
 import random
 import copy
 import sys
@@ -176,20 +177,7 @@ def create_patched_render_script():
         if old_margin_check in patched_content:
             patched_content = patched_content.replace(old_margin_check, new_margin_check)
     
-    check_vis_start = patched_content.find('def check_visibility(blender_objects, min_pixels_per_object):')
-    if check_vis_start != -1:
-        docstring_end = patched_content.find('"""', check_vis_start + 50)
-        docstring_end = patched_content.find('\n', docstring_end) + 1
-        next_def = patched_content.find('\ndef ', docstring_end)
-        if next_def == -1:
-            next_def = len(patched_content)
-        
-        new_function = '''def check_visibility(blender_objects, min_pixels_per_object):
-  return True
-
-'''
-        patched_content = patched_content[:check_vis_start] + new_function + patched_content[next_def:]
-    
+    # Visibility check left enabled (no longer patched to return True)
     patched_content = patched_content.replace(
         "parser.add_argument('--min_pixels_per_object', default=200, type=int,",
         "parser.add_argument('--min_pixels_per_object', default=50, type=int,"
@@ -447,10 +435,11 @@ def cf_change_position(scene):
     old_coords = obj['3d_coords']
     
     try:
-        with open('data/properties.json', 'r') as f:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(script_dir, 'data', 'properties.json'), 'r') as f:
             properties = json.load(f)
             size_mapping = properties['sizes']
-    except:
+    except Exception:
         size_mapping = {'small': 0.35, 'large': 0.7}
     
     r = size_mapping.get(obj['size'], 0.5)
@@ -458,12 +447,9 @@ def cf_change_position(scene):
         r /= math.sqrt(2)
     
     min_dist = 0.25
-    
-    max_attempts = 100
-    for attempt in range(max_attempts):
+    for attempt in range(100):
         new_x = random.uniform(-3, 3)
         new_y = random.uniform(-3, 3)
-
         try:
             dx0 = float(new_x) - float(old_coords[0])
             dy0 = float(new_y) - float(old_coords[1])
@@ -476,14 +462,11 @@ def cf_change_position(scene):
         for other_idx, other_obj in enumerate(cf_scene['objects']):
             if other_idx == move_idx:
                 continue
-            
             other_x, other_y, _ = other_obj['3d_coords']
             other_r = size_mapping.get(other_obj['size'], 0.5)
             if other_obj['shape'] == 'cube':
                 other_r /= math.sqrt(2)
-            
             dist = math.sqrt((new_x - other_x)**2 + (new_y - other_y)**2)
-            
             if dist < (r + other_r + min_dist):
                 collision = True
                 break
@@ -502,10 +485,11 @@ def cf_change_surrounding_count(scene):
         return cf_scene, "no change (0 objects)"
     
     try:
-        with open('data/properties.json', 'r') as f:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(script_dir, 'data', 'properties.json'), 'r') as f:
             properties = json.load(f)
             size_mapping = properties['sizes']
-    except:
+    except Exception:
         size_mapping = {'small': 0.35, 'large': 0.7}
     
     action = random.choice(['add', 'remove'])
@@ -571,7 +555,6 @@ def cf_change_surrounding_count(scene):
             return cf_scene, "no change (couldn't find valid positions for new objects)"
     
     else:
-        # Remove 1-2 objects
         num_to_remove = min(random.randint(1, 2), len(cf_scene['objects']) - 1)
         removed = []
         for _ in range(num_to_remove):
@@ -590,12 +573,12 @@ def cf_add_object(scene):
     materials = ['metal', 'rubber']
     sizes = ['small', 'large']
     
-    # Load size mapping
     try:
-        with open('data/properties.json', 'r') as f:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(script_dir, 'data', 'properties.json'), 'r') as f:
             properties = json.load(f)
             size_mapping = properties['sizes']
-    except:
+    except Exception:
         size_mapping = {'small': 0.35, 'large': 0.7}
     
     min_dist = 0.25
@@ -679,6 +662,193 @@ def cf_replace_object(scene):
     cf_scene['objects'][replace_idx] = new_obj
     
     return cf_scene, f"replaced {old_desc} with {new_color} {new_shape}"
+
+
+def cf_swap_attribute(scene):
+    """Swap colors between two existing objects. Tests if model relies on priors (e.g. sphere=red)."""
+    cf_scene = copy.deepcopy(scene)
+    
+    if len(cf_scene['objects']) < 2:
+        return cf_scene, "no swap (fewer than 2 objects)"
+    
+    idx_a, idx_b = random.sample(range(len(cf_scene['objects'])), 2)
+    obj_a = cf_scene['objects'][idx_a]
+    obj_b = cf_scene['objects'][idx_b]
+    
+    if obj_a['color'] == obj_b['color']:
+        return cf_scene, "no swap (both objects same color)"
+    
+    color_a, color_b = obj_a['color'], obj_b['color']
+    obj_a['color'] = color_b
+    obj_b['color'] = color_a
+    
+    return cf_scene, f"swapped colors between {color_a} {obj_a['shape']} and {color_b} {obj_b['shape']}"
+
+
+TARGET_OCCLUSION_COVERAGE = 0.6
+
+
+def cf_occlusion_change(scene):
+    """Move an object so it partially hides another. Tests spatial depth and partial shape recognition."""
+    cf_scene = copy.deepcopy(scene)
+    
+    if len(cf_scene['objects']) < 2:
+        return cf_scene, "no occlusion (fewer than 2 objects)"
+    
+    directions = cf_scene.get('directions', {})
+    front = directions.get('front', [0.75, -0.66, 0.0])
+    if len(front) < 2:
+        front = [0.75, -0.66]
+    
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(script_dir, 'data', 'properties.json'), 'r') as f:
+            properties = json.load(f)
+            size_mapping = properties['sizes']
+    except Exception:
+        size_mapping = {'small': 0.35, 'large': 0.7}
+    
+    def get_radius(obj):
+        r = size_mapping.get(obj['size'], 0.5)
+        if obj['shape'] == 'cube':
+            r /= math.sqrt(2)
+        return r
+    
+    min_dist = 0.15
+    def is_valid_occlusion_pos(cf_scene, occluder_idx, target_idx, new_x, new_y, occluder_r):
+        for i, other in enumerate(cf_scene['objects']):
+            if i == occluder_idx:
+                continue
+            other_x, other_y, _ = other['3d_coords']
+            other_r = get_radius(other)
+            dist = math.sqrt((new_x - other_x)**2 + (new_y - other_y)**2)
+            if dist < (occluder_r + other_r + min_dist):
+                return False
+        return -2.8 <= new_x <= 2.8 and -2.8 <= new_y <= 2.8
+    
+    fx, fy = float(front[0]), float(front[1])
+    norm = math.sqrt(fx * fx + fy * fy) or 1.0
+    coverage_range = 0.5
+    delta_max = coverage_range * (1.0 - TARGET_OCCLUSION_COVERAGE)
+    base_deltas = [0.02, 0.05, 0.08, 0.12, 0.18, delta_max * 0.5, delta_max]
+    
+    pairs = [(i, j) for i in range(len(cf_scene['objects'])) for j in range(len(cf_scene['objects'])) if i != j]
+    random.shuffle(pairs)
+    
+    for occluder_idx, target_idx in pairs:
+        occluder = cf_scene['objects'][occluder_idx]
+        target = cf_scene['objects'][target_idx]
+        tx, ty, tz = target['3d_coords']
+        oz = occluder['3d_coords'][2]
+        occluder_r = get_radius(occluder)
+        target_r = get_radius(target)
+        min_offset = occluder_r + target_r + min_dist
+        offsets = [min_offset + d for d in base_deltas]
+        
+        for offset in offsets:
+            new_x = tx + (fx / norm) * offset
+            new_y = ty + (fy / norm) * offset
+            if is_valid_occlusion_pos(cf_scene, occluder_idx, target_idx, new_x, new_y, occluder_r):
+                occluder['3d_coords'] = [new_x, new_y, oz]
+                occluder['pixel_coords'] = [0, 0, 0]
+                return cf_scene, f"moved {occluder['color']} {occluder['shape']} to partially occlude {target['color']} {target['shape']}"
+    
+    return cf_scene, "no occlusion (couldn't find valid position)"
+
+
+def cf_relational_flip(scene):
+    """Move object A from 'left of B' to 'right of B' (or vice versa). Targets spatial prepositions."""
+    cf_scene = copy.deepcopy(scene)
+    
+    if len(cf_scene['objects']) < 2:
+        return cf_scene, "no flip (fewer than 2 objects)"
+    
+    directions = cf_scene.get('directions', {})
+    left_vec = directions.get('left', [-0.66, -0.75, 0.0])
+    if len(left_vec) < 2:
+        left_vec = [-0.66, -0.75]
+    
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(script_dir, 'data', 'properties.json'), 'r') as f:
+            properties = json.load(f)
+            size_mapping = properties['sizes']
+    except Exception:
+        size_mapping = {'small': 0.35, 'large': 0.7}
+    
+    def get_radius(obj):
+        r = size_mapping.get(obj['size'], 0.5)
+        if obj['shape'] == 'cube':
+            r /= math.sqrt(2)
+        return r
+    
+    def is_valid_pos(cf_scene, a_idx, new_x, new_y, r_a, min_dist=0.12):
+        for i, other in enumerate(cf_scene['objects']):
+            if i == a_idx:
+                continue
+            ox, oy, _ = other['3d_coords']
+            other_r = get_radius(other)
+            dist = math.sqrt((new_x - ox)**2 + (new_y - oy)**2)
+            if dist < (r_a + other_r + min_dist):
+                return False
+        return -2.8 <= new_x <= 2.8 and -2.8 <= new_y <= 2.8
+    
+    relationships = cf_scene.get('relationships', {})
+    left_of = relationships.get('left', [])
+    right_of = relationships.get('right', [])
+    
+    candidates = []
+    for b_idx in range(len(cf_scene['objects'])):
+        for a_idx in left_of[b_idx] if b_idx < len(left_of) else []:
+            if a_idx != b_idx and a_idx < len(cf_scene['objects']):
+                candidates.append((a_idx, b_idx, 'left'))
+        for a_idx in right_of[b_idx] if b_idx < len(right_of) else []:
+            if a_idx != b_idx and a_idx < len(cf_scene['objects']):
+                candidates.append((a_idx, b_idx, 'right'))
+    
+    if not candidates:
+        lx, ly = float(left_vec[0]), float(left_vec[1])
+        for a_idx in range(len(cf_scene['objects'])):
+            for b_idx in range(len(cf_scene['objects'])):
+                if a_idx == b_idx:
+                    continue
+                ax_a, ay_a, _ = cf_scene['objects'][a_idx]['3d_coords']
+                bx_b, by_b, _ = cf_scene['objects'][b_idx]['3d_coords']
+                dx, dy = ax_a - bx_b, ay_a - by_b
+                dot = dx * lx + dy * ly
+                if abs(dot) > 0.2:
+                    side = 'left' if dot > 0 else 'right'
+                    candidates.append((a_idx, b_idx, side))
+    
+    if not candidates:
+        return cf_scene, "no flip (no clear left/right relationships)"
+    
+    random.shuffle(candidates)
+    lx, ly = float(left_vec[0]), float(left_vec[1])
+    
+    for a_idx, b_idx, side in candidates:
+        obj_a = cf_scene['objects'][a_idx]
+        obj_b = cf_scene['objects'][b_idx]
+        ax, ay, az = obj_a['3d_coords']
+        bx, by, bz = obj_b['3d_coords']
+        r_a = get_radius(obj_a)
+        
+        dx, dy = ax - bx, ay - by
+        dot_left = dx * lx + dy * ly
+        ref_dx = dx - 2 * dot_left * lx
+        ref_dy = dy - 2 * dot_left * ly
+        
+        for scale in [1.0, 0.9, 0.8, 0.7, 0.85, 0.75]:
+            new_x = bx + scale * ref_dx
+            new_y = by + scale * ref_dy
+            if is_valid_pos(cf_scene, a_idx, new_x, new_y, r_a):
+                obj_a['3d_coords'] = [new_x, new_y, az]
+                obj_a['pixel_coords'] = [0, 0, 0]
+                new_side = "right" if side == "left" else "left"
+                return cf_scene, f"moved {obj_a['color']} {obj_a['shape']} from {side} of {obj_b['color']} {obj_b['shape']} to {new_side}"
+    
+    return cf_scene, "no flip (couldn't find collision-free position)"
+
 
 def cf_change_background(scene):
     cf_scene = copy.deepcopy(scene)
@@ -854,16 +1024,17 @@ IMAGE_COUNTERFACTUALS = {
     'change_size': cf_change_size,
     'change_material': cf_change_material,
     'change_position': cf_change_position,
-    'change_count': cf_change_surrounding_count,
     'add_object': cf_add_object,
     'remove_object': cf_remove_object,
     'replace_object': cf_replace_object,
+    'swap_attribute': cf_swap_attribute,
+    'occlusion_change': cf_occlusion_change,
+    'relational_flip': cf_relational_flip,
 }
 
 # Negative CFs - These should NOT change answers to questions
 NEGATIVE_COUNTERFACTUALS = {
     'change_background': cf_change_background,
-    'change_texture': cf_change_texture,
     'change_lighting': cf_change_lighting,
     'add_noise': cf_add_noise,
     'apply_fisheye': cf_apply_fisheye,
@@ -965,7 +1136,7 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, same_c
         one_type = random.choice(list(COUNTERFACTUAL_TYPES.keys()))
         selected_types = [one_type] * num_counterfactuals
     elif cf_types:
-        selected_types = (cf_types * ((num_counterfactuals // len(cf_types)) + 1))[:num_counterfactuals]
+        selected_types = [random.choice(cf_types) for _ in range(num_counterfactuals)]
 
     if selected_types is not None:
         for cf_type in selected_types:
@@ -1293,14 +1464,15 @@ def list_counterfactual_types():
     print("  change_size        - Change size of an object (small/large)")
     print("  change_material    - Change material of an object (metal/rubber)")
     print("  change_position    - Move an object to a different location")
-    print("  change_count       - Add or remove objects from the scene")
     print("  add_object         - Add a new random object")
+    print("  swap_attribute     - Swap colors between two objects")
+    print("  occlusion_change   - Move object to partially hide another")
+    print("  relational_flip    - Move object from left of X to right of X")
     print("  remove_object      - Remove a random object")
     print("  replace_object     - Replace an object with a different one")
     
     print("\nNEGATIVE COUNTERFACTUALS (Should NOT change VQA answers):")
     print("  change_background  - Change background/ground color")
-    print("  change_texture     - Change texture style (all objects)")
     print("  change_lighting    - Change lighting conditions")
     print("  add_noise          - Add image noise/grain")
     print("  apply_fisheye      - Apply fisheye lens distortion")
@@ -1556,6 +1728,218 @@ def save_run_metadata(run_dir, args, successful_scenes, successful_renders):
     
     print(f"\n[OK] Saved run metadata to: {metadata_path}")
 
+
+def regenerate_scene_sets(args):
+    """Regenerate specific scene sets in an existing run. Uses settings from run_metadata.json."""
+    run_dir = os.path.join(args.output_dir, args.run_name)
+    if not os.path.exists(run_dir):
+        print(f"ERROR: Run directory does not exist: {run_dir}")
+        return
+    
+    metadata_path = os.path.join(run_dir, 'run_metadata.json')
+    if not os.path.exists(metadata_path):
+        print(f"ERROR: run_metadata.json not found in {run_dir}. Cannot determine original settings.")
+        return
+    
+    with open(metadata_path, 'r') as f:
+        metadata = json.load(f)
+    meta_args = metadata.get('arguments', {})
+    
+    scenes_dir = os.path.join(run_dir, 'scenes')
+    images_dir = os.path.join(run_dir, 'images')
+    os.makedirs(scenes_dir, exist_ok=True)
+    os.makedirs(images_dir, exist_ok=True)
+    
+    blender_path = args.blender_path or find_blender()
+    print(f"Using Blender: {blender_path}")
+    print("\nPreparing scripts...")
+    create_patched_render_script()
+    
+    scene_indices = sorted(set(args.regenerate))
+    num_counterfactuals = meta_args.get('num_counterfactuals', 2)
+    cf_types = meta_args.get('cf_types')
+    if isinstance(cf_types, list) and cf_types:
+        pass
+    else:
+        cf_types = None
+    
+    use_gpu = meta_args.get('use_gpu', 0)
+    samples = meta_args.get('samples', 512)
+    width = meta_args.get('width', 320)
+    height = meta_args.get('height', 240)
+    
+    print(f"\n{'='*70}")
+    print(f"REGENERATING {len(scene_indices)} SCENE SETS: {scene_indices}")
+    print(f"{'='*70}")
+    
+    temp_run_id = os.path.basename(run_dir)
+    checkpoint_file = os.path.join(run_dir, 'checkpoint.json')
+    completed_scenes = load_checkpoint(checkpoint_file)
+    
+    for i in scene_indices:
+        print(f"\n{'='*70}")
+        print(f"REGENERATING SCENE SET #{i}")
+        print(f"{'='*70}")
+        
+        num_objects = meta_args.get('num_objects')
+        if num_objects is None:
+            min_objs = meta_args.get('min_objects', 3)
+            max_objs = meta_args.get('max_objects', 7)
+            num_objects = random.randint(min_objs, max_objs)
+        
+        base_scene = None
+        for retry in range(3):
+            base_scene = generate_base_scene(num_objects, blender_path, i, temp_run_dir=temp_run_id)
+            if base_scene and len(base_scene.get('objects', [])) > 0:
+                break
+            print(f"  Retry {retry + 1}/3...")
+        
+        if not base_scene or len(base_scene.get('objects', [])) == 0:
+            print(f"  [FAILED] Could not generate base scene for #{i}")
+            continue
+        
+        min_cf_score = meta_args.get('min_cf_change_score', 1.0)
+        max_cf_attempts = meta_args.get('max_cf_attempts', 10)
+        min_noise = meta_args.get('min_noise_level', 'light')
+        
+        counterfactuals = generate_counterfactuals(
+            base_scene,
+            num_counterfactuals,
+            cf_types=cf_types,
+            same_cf_type=meta_args.get('same_cf_type', False),
+            min_change_score=min_cf_score,
+            max_cf_attempts=max_cf_attempts,
+            min_noise_level=min_noise
+        )
+        
+        for idx, cf in enumerate(counterfactuals):
+            print(f"    CF{idx+1} [{cf.get('cf_category', '?')}] ({cf.get('type', '?')}): {cf.get('description', '')}")
+        
+        scene_prefix = f"scene_{i:04d}"
+        scene_paths = {'original': os.path.join(scenes_dir, f"{scene_prefix}_original.json")}
+        image_paths = {'original': os.path.join(images_dir, f"{scene_prefix}_original.png")}
+        
+        base_scene['cf_metadata'] = {
+            'variant': 'original', 'is_counterfactual': False, 'cf_index': None,
+            'cf_category': 'original', 'cf_type': None, 'cf_description': None, 'source_scene': scene_prefix,
+        }
+        save_scene(base_scene, scene_paths['original'])
+        
+        for idx, cf in enumerate(counterfactuals):
+            cf_name = f"cf{idx+1}"
+            scene_paths[cf_name] = os.path.join(scenes_dir, f"{scene_prefix}_{cf_name}.json")
+            image_paths[cf_name] = os.path.join(images_dir, f"{scene_prefix}_{cf_name}.png")
+            cf_scene = cf['scene']
+            cf_scene['cf_metadata'] = {
+                'variant': cf_name, 'is_counterfactual': True, 'cf_index': idx + 1,
+                'cf_category': cf.get('cf_category', 'unknown'), 'cf_type': cf.get('type', None),
+                'cf_description': cf.get('description', None), 'change_score': cf.get('change_score'),
+                'change_attempts': cf.get('change_attempts'), 'source_scene': scene_prefix,
+            }
+            save_scene(cf_scene, scene_paths[cf_name])
+        
+        print(f"  [OK] Saved {len(counterfactuals) + 1} scene files")
+        
+        if not args.skip_render:
+            print("  Rendering...")
+            render_success = 0
+            for scene_type, scene_path in scene_paths.items():
+                if render_scene(blender_path, scene_path, image_paths[scene_type],
+                               use_gpu, samples, width, height):
+                    render_success += 1
+                    print(f"    [OK] {scene_type}")
+            print(f"  [OK] Rendered {render_success}/{len(scene_paths)} images")
+            completed_scenes.add(i)
+    
+    save_checkpoint(checkpoint_file, list(completed_scenes))
+    
+    temp_run_path = os.path.join(os.getcwd(), 'temp_output', temp_run_id)
+    if os.path.exists(temp_run_path):
+        shutil.rmtree(temp_run_path)
+    if os.path.exists('render_images_patched.py'):
+        try:
+            os.remove('render_images_patched.py')
+        except Exception:
+            pass
+    
+    print(f"\n{'='*70}")
+    print("REGENERATION COMPLETE")
+    print(f"{'='*70}")
+    print(f"Regenerated {len(scene_indices)} scene sets: {scene_indices}")
+    print(f"Run directory: {run_dir}")
+    
+    if args.generate_questions:
+        if generate_mapping_with_questions is None:
+            print("\n[WARNING] Questions module not found. Skipping CSV generation.")
+        else:
+            print("\nRegenerating questions CSV...")
+            try:
+                generate_mapping_with_questions(run_dir, args.csv_name, generate_questions=True)
+                print(f"[OK] CSV saved to: {os.path.join(run_dir, args.csv_name)}")
+            except Exception as e:
+                print(f"[ERROR] Questions: {e}")
+                import traceback
+                traceback.print_exc()
+
+
+def filter_same_answer_scenes(run_dir, csv_filename):
+    """Remove CSV rows where CF1 or CF2 answer matches original; delete those scenes' images and scene JSONs."""
+    csv_path = os.path.join(run_dir, csv_filename)
+    if not os.path.isfile(csv_path):
+        return
+    with open(csv_path, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        header = next(reader)
+        try:
+            idx_orig_ans = header.index('original_image_answer_to_original_question')
+            idx_cf1_ans = header.index('cf1_image_answer_to_cf1_question')
+            idx_cf2_ans = header.index('cf2_image_answer_to_cf2_question')
+            idx_orig_img = header.index('original_image')
+        except ValueError:
+            return
+    kept_rows = [header]
+    removed_scene_ids = set()
+    with open(csv_path, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        next(reader)
+        for row in reader:
+            if len(row) <= max(idx_orig_ans, idx_cf1_ans, idx_cf2_ans, idx_orig_img):
+                kept_rows.append(row)
+                continue
+            o = str(row[idx_orig_ans]).strip().lower()
+            c1 = str(row[idx_cf1_ans]).strip().lower()
+            c2 = str(row[idx_cf2_ans]).strip().lower()
+            if o == c1 or o == c2:
+                orig_img = row[idx_orig_img]
+                if orig_img.endswith('_original.png'):
+                    scene_id = orig_img.replace('_original.png', '')
+                    removed_scene_ids.add(scene_id)
+                continue
+            kept_rows.append(row)
+    if not removed_scene_ids:
+        return
+    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+        writer.writerows(kept_rows)
+    images_dir = os.path.join(run_dir, 'images')
+    scenes_dir = os.path.join(run_dir, 'scenes')
+    deleted = 0
+    for scene_id in removed_scene_ids:
+        for suffix in ('_original', '_cf1', '_cf2'):
+            for d, ext in [(images_dir, '.png'), (scenes_dir, '.json')]:
+                if not os.path.isdir(d):
+                    continue
+                fn = scene_id + suffix + ext
+                fp = os.path.join(d, fn)
+                if os.path.isfile(fp):
+                    try:
+                        os.remove(fp)
+                        deleted += 1
+                    except OSError:
+                        pass
+    print(f"\n[OK] Filtered {len(removed_scene_ids)} scenes where answers matched; removed {deleted} files. CSV now has {len(kept_rows) - 1} rows.")
+
+
 def main():
     # When run as a script, ensure we're in the project root
     # Change to script directory so relative paths work
@@ -1602,10 +1986,10 @@ def main():
                        # Image CFs (should change answers)
                        'change_color', 'change_shape', 'change_size', 
                        'change_material', 'change_position', 
-                       'change_count', 'add_object', 'remove_object',
-                       'replace_object',
+                       'add_object', 'remove_object', 'replace_object',
+                       'swap_attribute', 'occlusion_change', 'relational_flip',
                        # Negative CFs (should NOT change answers)
-                       'change_background', 'change_texture', 
+                       'change_background', 
                        'change_lighting', 'add_noise',
                        'apply_fisheye', 'apply_blur', 'apply_vignette', 'apply_chromatic_aberration'
                    ],
@@ -1625,8 +2009,12 @@ def main():
     
     parser.add_argument('--generate_questions', action='store_true',
                        help='Create questions and answers CSV after rendering completes')
+    parser.add_argument('--filter_same_answer', action='store_true',
+                       help='After generating questions, remove scenes where CF1 or CF2 answer matches original (delete those rows and their image/scene files). Use with --generate_questions.')
     parser.add_argument('--csv_name', default='image_mapping_with_questions.csv',
                        help='Output CSV filename (default: image_mapping_with_questions.csv)')
+    parser.add_argument('--regenerate', nargs='+', type=int, metavar='N',
+                       help='Regenerate specific scene sets by index (e.g. --regenerate 63 83 272). Requires --run_name. Uses settings from run_metadata.json.')
     
     args = parser.parse_args()
 
@@ -1640,6 +2028,13 @@ def main():
     
     if args.resume and not args.run_name:
         print("ERROR: --run_name is required when using --resume")
+        return
+    
+    if args.regenerate is not None:
+        if not args.run_name:
+            print("ERROR: --run_name is required when using --regenerate")
+            return
+        regenerate_scene_sets(args)
         return
     
     # Find Blender
@@ -1843,6 +2238,8 @@ def main():
                     generate_questions=True
                 )
                 print(f"\n[OK] CSV saved to: {os.path.join(run_dir, args.csv_name)}")
+                if getattr(args, 'filter_same_answer', False):
+                    filter_same_answer_scenes(run_dir, args.csv_name)
             except Exception as e:
                 print(f"\n[ERROR] Questions: {e}")
                 import traceback

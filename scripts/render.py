@@ -353,6 +353,15 @@ parser.add_argument('--render_tile_size', default=256, type=int,
 parser.add_argument('--output_image', default=None,
     help="Output image path (used when rendering from JSON)")
 
+MIN_VISIBLE_FRACTION = 0.001
+MIN_VISIBLE_FRACTION_PARTIAL_OCCLUSION = 0.0005
+MIN_PIXELS_FLOOR = 50
+
+
+def min_visible_pixels(width, height, fraction=MIN_VISIBLE_FRACTION, floor=MIN_PIXELS_FLOOR):
+  return max(floor, int(width * height * fraction))
+
+
 BACKGROUND_COLORS = {
     'default': None,
     'gray': (0.5, 0.5, 0.5),
@@ -370,11 +379,11 @@ BACKGROUND_COLORS = {
 
 LIGHTING_PRESETS = {
     'default': {'key': 1.0, 'fill': 0.5, 'back': 0.3},
-    'bright': {'key': 4.0, 'fill': 2.2, 'back': 1.4},
-    'dim': {'key': 0.08, 'fill': 0.04, 'back': 0.02},
-    'warm': {'key': 2.8, 'fill': 1.4, 'back': 0.7, 'color': (1.0, 0.75, 0.5)},
-    'cool': {'key': 2.0, 'fill': 1.1, 'back': 0.9, 'color': (0.5, 0.75, 1.0)},
-    'dramatic': {'key': 5.5, 'fill': 0.05, 'back': 0.02},
+    'bright': {'key': 12.0, 'fill': 6.0, 'back': 4.0},
+    'dim': {'key': 0.008, 'fill': 0.004, 'back': 0.002},
+    'warm': {'key': 5.0, 'fill': 0.8, 'back': 0.3, 'color': (1.0, 0.5, 0.2)},
+    'cool': {'key': 4.0, 'fill': 2.0, 'back': 1.5, 'color': (0.2, 0.5, 1.0)},
+    'dramatic': {'key': 15.0, 'fill': 0.005, 'back': 0.002},
 }
 
 def set_background_color(color_name):
@@ -540,6 +549,7 @@ def render_from_json(args):
   shape_semantic_to_file = properties['shapes']
   material_semantic_to_file = properties['materials']
   
+  blender_objects = []
   print("Adding objects to scene...")
   for i, obj_info in enumerate(scene_struct.get('objects', [])):
     x, y, z = obj_info['3d_coords']
@@ -560,6 +570,8 @@ def render_from_json(args):
     except Exception as e:
       print(f"Error adding object {i}: {e}")
       continue
+    if INSIDE_BLENDER and bpy.context.object:
+      blender_objects.append(bpy.context.object)
     
     rgba = color_name_to_rgba[obj_info['color']]
     semantic_material = obj_info['material']
@@ -574,6 +586,26 @@ def render_from_json(args):
       add_material(mat_file_name, Color=rgba)
     except Exception as e:
       print(f"Warning: Could not add material: {e}")
+  
+  if blender_objects:
+    cf_meta = scene_struct.get('cf_metadata') or {}
+    cf_type = cf_meta.get('cf_type', '')
+    w = getattr(args, 'width', 320)
+    h = getattr(args, 'height', 240)
+    if cf_type == 'occlusion_change':
+      min_pixels = min_visible_pixels(w, h, MIN_VISIBLE_FRACTION_PARTIAL_OCCLUSION, MIN_PIXELS_FLOOR)
+    else:
+      base = min_visible_pixels(w, h, MIN_VISIBLE_FRACTION, MIN_PIXELS_FLOOR)
+      min_pixels = max(getattr(args, 'min_pixels_per_object', MIN_PIXELS_FLOOR), base)
+    all_visible = check_visibility(blender_objects, min_pixels)
+    if not all_visible:
+      print('Visibility check failed: at least one object has too few visible pixels')
+      for obj in blender_objects:
+        try:
+          delete_object(obj)
+        except Exception:
+          pass
+      sys.exit(1)
   
   filter_type = scene_struct.get('filter_type')
   filter_strength = scene_struct.get('filter_strength', 1.0)
@@ -858,7 +890,8 @@ def add_random_objects(scene_struct, num_objects, args, camera, max_scene_attemp
     if len(objects) < num_objects:
       continue
 
-    all_visible = check_visibility(blender_objects, args.min_pixels_per_object)
+    min_pixels = max(args.min_pixels_per_object, min_visible_pixels(args.width, args.height))
+    all_visible = check_visibility(blender_objects, min_pixels)
     if not all_visible:
       print('Some objects are occluded; replacing objects')
       for obj in blender_objects:
@@ -898,15 +931,46 @@ def compute_all_relationships(scene_struct, eps=0.2):
 
 
 def check_visibility(blender_objects, min_pixels_per_object):
-  """Visibility check disabled for compatibility (was causing scene gen to fail)."""
-  return True
+  """
+  Ensure each object has at least min_pixels_per_object visible pixels in the
+  rendered image (rejects scenes where an object is fully occluded by others).
+  """
+  if not INSIDE_BLENDER or not blender_objects:
+    return True
+  if Image is None:
+    return True
+  fd, path = tempfile.mkstemp(suffix='.png')
+  os.close(fd)
+  try:
+    colors_list = render_shadeless(blender_objects, path, use_distinct_colors=True)
+    img = Image.open(path).convert('RGB')
+    w, h = img.size
+    pix = img.load()
+    color_to_idx = {}
+    for i, (r, g, b) in enumerate(colors_list):
+      key = (round(r * 255), round(g * 255), round(b * 255))
+      color_to_idx[key] = i
+    counts = [0] * len(blender_objects)
+    for y in range(h):
+      for x in range(w):
+        key = (pix[x, y][0], pix[x, y][1], pix[x, y][2])
+        if key in color_to_idx:
+          counts[color_to_idx[key]] += 1
+    all_visible = all(c >= min_pixels_per_object for c in counts)
+    return all_visible
+  finally:
+    try:
+      os.remove(path)
+    except Exception:
+      pass
 
 
-def render_shadeless(blender_objects, path='flat.png'):
+def render_shadeless(blender_objects, path='flat.png', use_distinct_colors=False):
   """
   Render a version of the scene with shading disabled and unique materials
   assigned to all objects. The image itself is written to path. This is used to ensure
   that all objects will be visible in the final rendered scene (when check_visibility is enabled).
+  Returns a list of (r,g,b) colors in object order (for visibility counting when use_distinct_colors=True).
   """
   render_args = bpy.context.scene.render
 
@@ -924,7 +988,8 @@ def render_shadeless(blender_objects, path='flat.png'):
       obj = bpy.data.objects[obj_name]
       obj.hide_render = True
 
-  object_colors = set()
+  n = len(blender_objects)
+  object_colors = [] if use_distinct_colors else set()
   old_materials = []
   for i, obj in enumerate(blender_objects):
     if len(obj.data.materials) > 0:
@@ -940,10 +1005,16 @@ def render_shadeless(blender_objects, path='flat.png'):
     node_emission = nodes.new(type='ShaderNodeEmission')
     node_output = nodes.new(type='ShaderNodeOutputMaterial')
     
-    while True:
-      r, g, b = [random.random() for _ in range(3)]
-      if (r, g, b) not in object_colors: break
-    object_colors.add((r, g, b))
+    if use_distinct_colors:
+      r = (i + 1) / (n + 1)
+      g, b = 0.5, 0.5
+      object_colors.append((r, g, b))
+    else:
+      while True:
+        r, g, b = [random.random() for _ in range(3)]
+        if (r, g, b) not in object_colors:
+          break
+      object_colors.add((r, g, b))
     
     node_emission.inputs['Color'].default_value = (r, g, b, 1.0)
     mat.node_tree.links.new(node_emission.outputs['Emission'], node_output.inputs['Surface'])

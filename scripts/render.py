@@ -338,6 +338,11 @@ MIN_VISIBLE_FRACTION = 0.001
 MIN_VISIBLE_FRACTION_PARTIAL_OCCLUSION = 0.0005
 MIN_PIXELS_FLOOR = 50
 
+BASE_MIN_VISIBILITY_FRACTION = 0.9
+CF_OCCLUSION_MIN_VISIBILITY_FRACTION = 0.3
+CF_OCCLUSION_MAX_VISIBILITY_FRACTION = 0.5
+CF_OCCLUSION_HARD_MIN_FRACTION = 0.2
+
 
 def min_visible_pixels(width, height, fraction=MIN_VISIBLE_FRACTION, floor=MIN_PIXELS_FLOOR):
   return max(floor, int(width * height * fraction))
@@ -570,16 +575,75 @@ def render_from_json(args):
   if blender_objects:
     cf_meta = scene_struct.get('cf_metadata') or {}
     cf_type = cf_meta.get('cf_type', '')
-    w = getattr(args, 'width', 320)
-    h = getattr(args, 'height', 240)
-    if cf_type == 'occlusion_change':
-      min_pixels = min_visible_pixels(w, h, MIN_VISIBLE_FRACTION_PARTIAL_OCCLUSION, MIN_PIXELS_FLOOR)
+
+    visibility_info = None
+    if INSIDE_BLENDER and Image is not None:
+      try:
+        visibility_info = compute_visibility_fractions(blender_objects)
+      except Exception as e:
+        print(f"Warning: compute_visibility_fractions failed during render: {e}")
+        visibility_info = None
+
+    all_visible = True
+    fail_reason = 'unknown visibility failure'
+
+    if visibility_info is not None:
+      ratios, scene_counts, full_counts = visibility_info
+
+      if cf_type == 'occlusion_change':
+        too_hidden = [
+          (i, r) for i, r in enumerate(ratios)
+          if full_counts[i] > 0 and r < CF_OCCLUSION_HARD_MIN_FRACTION
+        ]
+        band_objects = [
+          (i, r) for i, r in enumerate(ratios)
+          if full_counts[i] > 0 and CF_OCCLUSION_MIN_VISIBILITY_FRACTION <= r <= CF_OCCLUSION_MAX_VISIBILITY_FRACTION
+        ]
+
+        if too_hidden:
+          all_visible = False
+          min_r = min(r for (_, r) in too_hidden)
+          fail_reason = (f'at least one object is too occluded in occlusion_change CF; '
+                         f'min visibility fraction={min_r:.3f} '
+                         f'(required >= {CF_OCCLUSION_HARD_MIN_FRACTION})')
+        elif not band_objects:
+          all_visible = False
+          fail_reason = (f'no object falls into required occlusion band '
+                         f'[{CF_OCCLUSION_MIN_VISIBILITY_FRACTION}, '
+                         f'{CF_OCCLUSION_MAX_VISIBILITY_FRACTION}]')
+        else:
+          all_visible = True
+
+      else:
+        too_occluded = [
+          (i, r) for i, r in enumerate(ratios)
+          if full_counts[i] > 0 and r < BASE_MIN_VISIBILITY_FRACTION
+        ]
+        if too_occluded:
+          all_visible = False
+          min_r = min(r for (_, r) in too_occluded)
+          fail_reason = (f'at least one object is too occluded in base scene; '
+                         f'min visibility fraction={min_r:.3f} '
+                         f'(required >= {BASE_MIN_VISIBILITY_FRACTION})')
+        else:
+          all_visible = True
+
     else:
-      base = min_visible_pixels(w, h, MIN_VISIBLE_FRACTION, MIN_PIXELS_FLOOR)
-      min_pixels = max(getattr(args, 'min_pixels_per_object', MIN_PIXELS_FLOOR), base)
-    all_visible = check_visibility(blender_objects, min_pixels)
+      # Fallback to legacy absolute pixel-based visibility when we cannot
+      # compute per-object relative visibility (e.g., PIL not available).
+      w = getattr(args, 'width', 320)
+      h = getattr(args, 'height', 240)
+      if cf_type == 'occlusion_change':
+        min_pixels = min_visible_pixels(w, h, MIN_VISIBLE_FRACTION_PARTIAL_OCCLUSION, MIN_PIXELS_FLOOR)
+      else:
+        base = min_visible_pixels(w, h, MIN_VISIBLE_FRACTION, MIN_PIXELS_FLOOR)
+        min_pixels = max(getattr(args, 'min_pixels_per_object', MIN_PIXELS_FLOOR), base)
+      all_visible = check_visibility(blender_objects, min_pixels)
+      if not all_visible:
+        fail_reason = 'at least one object has too few visible pixels'
+
     if not all_visible:
-      print('Visibility check failed: at least one object has too few visible pixels')
+      print(f'Visibility check failed: {fail_reason}')
       for obj in blender_objects:
         try:
           delete_object(obj)
@@ -867,8 +931,30 @@ def add_random_objects(scene_struct, num_objects, args, camera, max_scene_attemp
     if len(objects) < num_objects:
       continue
 
-    min_pixels = max(args.min_pixels_per_object, min_visible_pixels(args.width, args.height))
-    all_visible = check_visibility(blender_objects, min_pixels)
+    visibility_info = None
+    if INSIDE_BLENDER and Image is not None:
+      try:
+        visibility_info = compute_visibility_fractions(blender_objects)
+      except Exception as e:
+        print(f"Warning: compute_visibility_fractions failed during scene generation: {e}")
+        visibility_info = None
+
+    all_visible = True
+    if visibility_info is not None:
+      ratios, scene_counts, full_counts = visibility_info
+      min_ratio = min((r for r in ratios if full_counts[ratios.index(r)] > 0), default=1.0)
+      all_visible = all(
+        (full_counts[i] == 0) or (ratios[i] >= BASE_MIN_VISIBILITY_FRACTION)
+        for i in range(len(ratios))
+      )
+      if not all_visible:
+        print(f'Some objects are too occluded in generated scene; '
+              f'min visibility fraction={min_ratio:.3f} (required >= {BASE_MIN_VISIBILITY_FRACTION})')
+    else:
+      # Fallback to legacy absolute pixel-based visibility when PIL or Blender context is unavailable.
+      min_pixels = max(args.min_pixels_per_object, min_visible_pixels(args.width, args.height))
+      all_visible = check_visibility(blender_objects, min_pixels)
+
     if not all_visible:
       print('Some objects are occluded; replacing objects')
       for obj in blender_objects:
@@ -907,7 +993,91 @@ def compute_all_relationships(scene_struct, eps=0.2):
   return all_relationships
 
 
+def compute_visibility_fractions(blender_objects):
+  if not INSIDE_BLENDER or not blender_objects:
+    return None
+  if Image is None:
+    return None
+
+  # First pass: all objects together (occluded counts).
+  fd, path = tempfile.mkstemp(suffix='.png')
+  os.close(fd)
+  try:
+    colors_list = render_shadeless(blender_objects, path, use_distinct_colors=True)
+    img = Image.open(path).convert('RGB')
+    w, h = img.size
+    pix = img.load()
+    color_to_idx = {}
+    for i, (r, g, b) in enumerate(colors_list):
+      key = (round(r * 255), round(g * 255), round(b * 255))
+      color_to_idx[key] = i
+    scene_counts = [0] * len(blender_objects)
+    for y in range(h):
+      for x in range(w):
+        key = (pix[x, y][0], pix[x, y][1], pix[x, y][2])
+        if key in color_to_idx:
+          scene_counts[color_to_idx[key]] += 1
+  finally:
+    try:
+      os.remove(path)
+    except Exception:
+      pass
+
+  # Second pass: per-object "full area" with other objects hidden.
+  full_counts = []
+  original_hide_render = [obj.hide_render for obj in blender_objects]
+  try:
+    for idx, obj in enumerate(blender_objects):
+      # Hide all other objects, ensure this one is visible.
+      for j, other in enumerate(blender_objects):
+        if j == idx:
+          other.hide_render = False
+        else:
+          other.hide_render = True
+
+      fd_i, path_i = tempfile.mkstemp(suffix='.png')
+      os.close(fd_i)
+      try:
+        colors_list = render_shadeless([obj], path_i, use_distinct_colors=True)
+        img = Image.open(path_i).convert('RGB')
+        w, h = img.size
+        pix = img.load()
+        color_to_idx = {}
+        for i, (r, g, b) in enumerate(colors_list):
+          key = (round(r * 255), round(g * 255), round(b * 255))
+          color_to_idx[key] = i
+        count = 0
+        for y in range(h):
+          for x in range(w):
+            key = (pix[x, y][0], pix[x, y][1], pix[x, y][2])
+            if key in color_to_idx:
+              count += 1
+        full_counts.append(count)
+      finally:
+        try:
+          os.remove(path_i)
+        except Exception:
+          pass
+  finally:
+    # Restore previous hide_render flags.
+    for obj, prev in zip(blender_objects, original_hide_render):
+      obj.hide_render = prev
+
+  visibility = []
+  for scene_c, full_c in zip(scene_counts, full_counts):
+    if full_c <= 0:
+      visibility.append(0.0)
+    else:
+      visibility.append(float(scene_c) / float(full_c))
+
+  return visibility, scene_counts, full_counts
+
+
 def check_visibility(blender_objects, min_pixels_per_object):
+  """
+  Legacy absolute pixel-count visibility check, kept as a fallback when
+  relative per-object visibility cannot be computed.
+  """
   if not INSIDE_BLENDER or not blender_objects:
     return True
   if Image is None:

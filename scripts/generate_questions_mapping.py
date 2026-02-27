@@ -39,7 +39,58 @@ def load_scene(scene_file):
         return json.load(f)
 
 RELATION_KEYS_TO_PHRASES = {'left': 'left of', 'right': 'right of', 'front': 'in front of', 'behind': 'behind'}
+PHRASES_TO_RELATION_KEYS = {'left of': 'left', 'right of': 'right', 'in front of': 'front', 'behind': 'behind'}
 DEFAULT_RELATIONS = ['left of', 'right of', 'in front of', 'behind']
+
+# Token sets for parsing questions
+_COLORS = ['red', 'blue', 'green', 'brown', 'purple', 'cyan', 'yellow', 'gray', 'grey']
+_SHAPES = ['cube', 'sphere', 'cylinder', 'cubes', 'spheres', 'cylinders']
+_MATERIALS = ['metal', 'rubber', 'metals', 'rubbers']
+_SIZES = ['small', 'large']
+
+
+def _find_objects_matching(objects, color=None, shape=None, material=None, size=None):
+    """Return list of object indices that match all specified attributes (None means any)."""
+    out = []
+    for i, obj in enumerate(objects):
+        if color is not None and (obj.get('color') or '').lower() != color:
+            continue
+        if shape is not None:
+            s = (obj.get('shape') or '').lower()
+            if s != shape and s != shape.rstrip('s') and s + 's' != shape:
+                continue
+        if material is not None and (obj.get('material') or '').lower() != material:
+            continue
+        if size is not None and (obj.get('size') or '').lower() != size:
+            continue
+        out.append(i)
+    return out
+
+
+def _first_value_in_question(question_lower, values, strip_s=True):
+    for v in values:
+        if v in question_lower:
+            return v.rstrip('s') if strip_s and v.endswith('s') else v
+    return None
+
+
+def _objects_in_relation_to_reference(scene, relation_phrase, ref_color=None, ref_shape=None, ref_material=None, ref_size=None):
+    """Return set of object indices that stand in relation_phrase to the reference object (e.g. 'left of' the red cube)."""
+    objects = scene.get('objects', [])
+    rel_key = PHRASES_TO_RELATION_KEYS.get(relation_phrase)
+    if not rel_key:
+        return set()
+    rels = scene.get('relationships') or {}
+    rel_list = rels.get(rel_key)
+    if not rel_list or len(rel_list) != len(objects):
+        return set()
+    ref_indices = _find_objects_matching(
+        objects, color=ref_color, shape=ref_shape, material=ref_material, size=ref_size
+    )
+    if not ref_indices:
+        return set()
+    ref_idx = ref_indices[0]
+    return set(rel_list[ref_idx])
 
 
 def get_scene_properties(scene):
@@ -178,13 +229,123 @@ def _get_attributes_with_different_counts(original_scene, cf_scene):
     return differing
 
 
-def generate_question_for_counterfactual(cf_type, original_scene, cf_scene, retry_index=0):
+def generate_question_for_counterfactual(cf_type, original_scene, cf_scene, retry_index=0, original_question=None, original_params=None):
+    """
+    Generate a counterfactual question. If original_question and original_params are provided,
+    uses strict targeting: (1) try original question, (2) try mutated questions that target
+    the change, (3) return (None, None) to signal rejection/retry if no question yields an answer change.
+    """
+    # --- Strict counterfactual targeting when original question is provided ---
+    if original_question is not None and original_params is not None:
+        a_orig = answer_question_for_scene(original_question, original_scene)
+        a_cf = answer_question_for_scene(original_question, cf_scene)
+        a_orig_n = normalize_answer(a_orig)
+        a_cf_n = normalize_answer(a_cf)
+        if a_orig_n != a_cf_n:
+            return (original_question, original_params)
+        for mut_q, mut_params in create_counterfactual_questions(original_question, original_params, original_scene):
+            a_mut_cf = answer_question_for_scene(mut_q, cf_scene)
+            if normalize_answer(a_mut_cf) != a_orig_n:
+                return (mut_q, mut_params)
+        return (None, None)
+
     random.seed(hash((str(cf_type), retry_index, str(id(original_scene)), str(id(cf_scene)))))
     change = get_change_details(original_scene, cf_scene)
     orig_objs = original_scene.get('objects', [])
     cf_objs = cf_scene.get('objects', [])
     props_orig = get_scene_properties(original_scene)
     props_cf = get_scene_properties(cf_scene)
+
+    def _pick_spatial_question(props):
+        """Strict spatial/relational templates only; never simple attribute count."""
+        relations = props.get('relations') or DEFAULT_RELATIONS
+        colors = list(props.get('colors') or props.get('all_colors') or ['red', 'blue', 'green'])
+        shapes = list(props.get('shapes') or props.get('all_shapes') or ['cube', 'sphere', 'cylinder'])
+        materials = list(props.get('materials') or props.get('all_materials') or ['metal', 'rubber'])
+        sizes = list(props.get('sizes') or props.get('all_sizes') or ['small', 'large'])
+        templates = [
+            ("What color is the object {relation} the {color} {shape}?", {
+                'relation': random.choice(relations), 'color': random.choice(colors), 'shape': random.choice(shapes)
+            }),
+            ("What shape is the object {relation} the {material} object?", {
+                'relation': random.choice(relations), 'material': random.choice(materials)
+            }),
+            ("How many objects are {relation} the {color} {shape}?", {
+                'relation': random.choice(relations), 'color': random.choice(colors), 'shape': random.choice(shapes)
+            }),
+            ("How many {material} objects are {relation} the {shape}?", {
+                'material': random.choice(materials), 'relation': random.choice(relations), 'shape': random.choice(shapes)
+            }),
+            ("Is there a {color} object {relation} the {shape}?", {
+                'color': random.choice(colors), 'relation': random.choice(relations), 'shape': random.choice(shapes)
+            }),
+            ("What is the total number of {size} objects {relation} the {color} object?", {
+                'size': random.choice(sizes), 'relation': random.choice(relations), 'color': random.choice(colors)
+            }),
+            ("What is the total number of {material} objects {relation} the {color} {shape}?", {
+                'material': random.choice(materials), 'relation': random.choice(relations),
+                'color': random.choice(colors), 'shape': random.choice(shapes)
+            }),
+            ("Is there a {size} {material} object {relation} the {shape}?", {
+                'size': random.choice(sizes), 'material': random.choice(materials),
+                'relation': random.choice(relations), 'shape': random.choice(shapes)
+            }),
+        ]
+        template, params = random.choice(templates)
+        return template.format(**params), params
+
+    def _pick_compositional_question(props):
+        """Strict compositional (≥2 attributes) templates only; never single-attribute count."""
+        colors = list(props.get('colors') or props.get('all_colors') or ['red', 'blue', 'green'])
+        shapes = list(props.get('shapes') or props.get('all_shapes') or ['cube', 'sphere', 'cylinder'])
+        materials = list(props.get('materials') or props.get('all_materials') or ['metal', 'rubber'])
+        sizes = list(props.get('sizes') or props.get('all_sizes') or ['small', 'large'])
+        templates = [
+            ("How many {color} {shape}s are there?", {
+                'color': random.choice(colors), 'shape': random.choice(shapes)
+            }),
+            ("Are there any {color} {shape}s?", {
+                'color': random.choice(colors), 'shape': random.choice(shapes)
+            }),
+            ("Is there a {color} {shape}?", {
+                'color': random.choice(colors), 'shape': random.choice(shapes)
+            }),
+            ("Is there a {material} {shape}?", {
+                'material': random.choice(materials), 'shape': random.choice(shapes)
+            }),
+            ("How many {size} {color} objects are there?", {
+                'size': random.choice(sizes), 'color': random.choice(colors)
+            }),
+            ("What is the total number of {color} {material} objects?", {
+                'color': random.choice(colors), 'material': random.choice(materials)
+            }),
+            ("Are there any {material} {shape}s?", {
+                'material': random.choice(materials), 'shape': random.choice(shapes)
+            }),
+            ("How many {size} {shape}s are there?", {
+                'size': random.choice(sizes), 'shape': random.choice(shapes)
+            }),
+        ]
+        template, params = random.choice(templates)
+        return template.format(**params), params
+
+    # --- change_position: STRICTLY spatial/relational only; never simple attribute count ---
+    if cf_type == 'change_position':
+        props = props_cf if (props_cf.get('relations') or props_cf.get('colors') or props_cf.get('shapes')) else props_orig
+        question, params = _pick_spatial_question(props)
+        return question, params
+
+    # --- relational_flip: STRICTLY spatial/relational only ---
+    if cf_type == 'relational_flip':
+        props = props_cf if (props_cf.get('relations') or props_cf.get('colors') or props_cf.get('shapes')) else props_orig
+        question, params = _pick_spatial_question(props)
+        return question, params
+
+    # --- swap_attribute: STRICTLY compositional (≥2 attributes) only; never single-attribute count ---
+    if cf_type == 'swap_attribute':
+        props = props_cf if (props_cf.get('colors') or props_cf.get('shapes')) else props_orig
+        question, params = _pick_compositional_question(props)
+        return question, params
 
     if cf_type and cf_type in IMAGE_CF_TYPES:
         differing = _get_attributes_with_different_counts(original_scene, cf_scene)
@@ -295,25 +456,31 @@ def generate_question_for_counterfactual(cf_type, original_scene, cf_scene, retr
                     question = template.format(val=val)
                 return question, {attr: val.rstrip('s') if attr == 'shape' else val}
 
-    if cf_type in ('change_size', 'change_material', 'change_position', 'swap_attribute', 'relational_flip'):
-        key = 'sizes' if cf_type == 'change_size' else ('materials' if cf_type == 'change_material' else 'colors')
+    if cf_type in ('change_size', 'change_material'):
+        key = 'sizes' if cf_type == 'change_size' else 'materials'
         attr = key.rstrip('s')
         vals = list(props_cf.get(key) or props_orig.get(key) or [])
         if vals:
             val = random.choice(vals)
             if cf_type == 'change_size':
                 template, _ = random.choice(CF_SIZE_QUESTION_TEMPLATES)
-            elif cf_type == 'change_material':
-                template, _ = random.choice(CF_MATERIAL_QUESTION_TEMPLATES)
             else:
-                template, _ = random.choice(CF_COLOR_QUESTION_TEMPLATES)
+                template, _ = random.choice(CF_MATERIAL_QUESTION_TEMPLATES)
             question = template.format(val=val)
             return question, {attr: val}
 
+    # Fallback: never use generic "How many objects?" for change_position, relational_flip, swap_attribute.
+    if cf_type in ('change_position', 'relational_flip', 'swap_attribute'):
+        props = props_cf if (props_cf.get('relations') or props_cf.get('colors')) else props_orig
+        if cf_type == 'swap_attribute':
+            question, params = _pick_compositional_question(props)
+        else:
+            question, params = _pick_spatial_question(props)
+        return question, params
     question = random.choice(CF_COUNT_QUESTION_TEMPLATES)
     return question, {}
 
-def generate_question_for_scene(scene_file):
+def generate_question_for_scene(scene_file, retry_index=None):
     scene = load_scene(scene_file)
     objects = scene.get('objects', [])
     
@@ -342,10 +509,6 @@ def generate_question_for_scene(scene_file):
         ("How many {size} {color} objects are there?", {
             'size': random.choice(props['sizes']),
             'color': random.choice(props['colors'])
-        }),
-        ("Is the {color} {shape} matte or shiny?", {
-            'color': random.choice(props['colors']),
-            'shape': random.choice(props['shapes'])
         }),
         ("Are there any {color} {shape}s?", {
             'color': random.choice(props['colors']),
@@ -395,9 +558,68 @@ def generate_question_for_scene(scene_file):
             'relation': random.choice(props['relations']),
             'size': random.choice(props['sizes'])
         }),
+        # --- Attribute Equivalence (Same/Different) ---
+        ("Is the color of the {shape1} the same as the {shape2}?", {
+            'shape1': random.choice(props['shapes']),
+            'shape2': random.choice(props['shapes'])
+        }),
+        ("Is the material of the {color} object the same as the {size} object?", {
+            'color': random.choice(props['colors']),
+            'size': random.choice(props['sizes'])
+        }),
+        ("Do the {size} object and the {material} object have the same shape?", {
+            'size': random.choice(props['sizes']),
+            'material': random.choice(props['materials'])
+        }),
+        # --- Logical Disjunction (OR) ---
+        ("How many objects are either {color} or {shape}?", {
+            'color': random.choice(props['colors']),
+            'shape': random.choice(props['shapes'])
+        }),
+        ("Are there any objects that are either {material} or {color}?", {
+            'material': random.choice(props['materials']),
+            'color': random.choice(props['colors'])
+        }),
+        ("What is the total number of objects that are either {size} or {shape}?", {
+            'size': random.choice(props['sizes']),
+            'shape': random.choice(props['shapes'])
+        }),
+        # --- Exact Numerical Comparison ---
+        ("Is the number of {color} objects equal to the number of {shape}s?", {
+            'color': random.choice(props['colors']),
+            'shape': random.choice(props['shapes'])
+        }),
+        ("Are there exactly as many {material} objects as {size} objects?", {
+            'material': random.choice(props['materials']),
+            'size': random.choice(props['sizes'])
+        }),
+        ("Does the scene contain an equal number of {color1} objects and {color2} objects?", dict(zip(
+            ['color1', 'color2'],
+            random.sample(props['colors'], 2) if len(props['colors']) >= 2 else [props['colors'][0]] * 2
+        ))),
+        # --- Complex Spatial & Attribute Composition ---
+        ("What is the total number of {material} objects {relation} the {color} {shape}?", {
+            'material': random.choice(props['materials']),
+            'relation': random.choice(props['relations']),
+            'color': random.choice(props['colors']),
+            'shape': random.choice(props['shapes'])
+        }),
+        ("Is there a {size} {material} object {relation} the {shape}?", {
+            'size': random.choice(props['sizes']),
+            'material': random.choice(props['materials']),
+            'relation': random.choice(props['relations']),
+            'shape': random.choice(props['shapes'])
+        }),
     ]
-    
-    random.seed(hash(scene_file))
+    # Add matte/shin only when the scene has a metal/rubber object; caller should accept only when CF is attribute-swap (not add/remove).
+    matte_shiny_objects = [o for o in objects if (o.get('material') or '').lower() in ('metal', 'rubber') and o.get('color') and o.get('shape')]
+    if matte_shiny_objects:
+        obj = random.choice(matte_shiny_objects)
+        templates.append(("Is the {color} {shape} matte or shiny?", {'color': obj.get('color'), 'shape': obj.get('shape')}))
+    if retry_index is not None:
+        random.seed(hash((scene_file, retry_index)))
+    else:
+        random.seed(hash(scene_file))
     template, params = random.choice(templates)
     
     question = template.format(**params) if params else template
@@ -422,12 +644,32 @@ def calculate_question_difficulty(question, params):
     else:
         return "hard"
 
+def _apply_param_replacements(question, params, cf_params):
+    """Replace param values in question with cf_params, from last to first by position, to avoid double-replacing when the same value appears for different placeholders."""
+    if not params or not cf_params:
+        return question
+    # Order keys by first occurrence of their value in the question (so we replace in document order)
+    positions = []
+    for k, v in params.items():
+        if k not in cf_params or cf_params[k] == v:
+            continue
+        pos = question.find(v)
+        if pos >= 0:
+            positions.append((pos, k, v, cf_params[k]))
+    # Replace from end to start so indices stay valid
+    positions.sort(key=lambda x: -x[0])
+    for pos, k, old_val, new_val in positions:
+        question = question[:pos] + new_val + question[pos + len(old_val):]
+    return question
+
+
 def create_counterfactual_questions(original_question, params, scene):
     props = get_scene_properties(scene)
     cf_questions = []
     
-    strategies = ['attribute_swap', 'question_type', 'scope_change', 
-                  'negation', 'comparative', 'multi_attribute']
+    strategies = ['attribute_swap', 'question_type', 'scope_change',
+                  'negation', 'comparative', 'multi_attribute',
+                  'same_different', 'either_or', 'equal_comparison']
     
     random.seed(hash(str(scene)))
     selected_strategies = random.sample(strategies, 2)
@@ -445,48 +687,40 @@ def create_counterfactual_questions(original_question, params, scene):
             if strategy == 'attribute_swap' and params:
                 cf_params = params.copy()
                 param_to_change = random.choice(list(params.keys()))
-                
-                if param_to_change == 'color':
-                    alternatives = [c for c in props['all_colors'] if c != params.get('color')]
-                    if alternatives:
-                        cf_params['color'] = random.choice(alternatives)
-                    else:
+                current = params.get(param_to_change)
+
+                def pick_alternative(attr_key, all_vals_getter):
+                    alts = [v for v in all_vals_getter() if v != current]
+                    if alts:
+                        cf_params[param_to_change] = random.choice(alts)
+                        return True
+                    return False
+
+                if param_to_change in ('color', 'color1', 'color2'):
+                    if not pick_alternative('color', lambda: props['all_colors']):
                         strategy = 'negation'
                         continue
-                elif param_to_change == 'shape':
-                    alternatives = [s for s in props['all_shapes'] if s != params.get('shape')]
-                    if alternatives:
-                        cf_params['shape'] = random.choice(alternatives)
-                    else:
+                elif param_to_change in ('shape', 'shape1', 'shape2'):
+                    if not pick_alternative('shape', lambda: props['all_shapes']):
                         strategy = 'negation'
                         continue
                 elif param_to_change == 'material':
-                    alternatives = [m for m in props['all_materials'] if m != params.get('material')]
-                    if alternatives:
-                        cf_params['material'] = random.choice(alternatives)
-                    else:
+                    if not pick_alternative('material', lambda: props['all_materials']):
                         strategy = 'negation'
                         continue
                 elif param_to_change == 'size':
-                    alternatives = [s for s in props['all_sizes'] if s != params.get('size')]
-                    if alternatives:
-                        cf_params['size'] = random.choice(alternatives)
-                    else:
+                    if not pick_alternative('size', lambda: props['all_sizes']):
                         strategy = 'negation'
                         continue
                 elif param_to_change == 'relation':
-                    alternatives = [r for r in props['relations'] if r != params.get('relation')]
-                    if alternatives:
-                        cf_params['relation'] = random.choice(alternatives)
-                    else:
+                    if not pick_alternative('relation', lambda: props['relations']):
                         strategy = 'negation'
                         continue
-                
-                cf_q = original_question
-                for key, old_val in params.items():
-                    new_val = cf_params[key]
-                    if old_val != new_val:
-                        cf_q = cf_q.replace(old_val, new_val)
+                else:
+                    retry_count += 1
+                    continue
+
+                cf_q = _apply_param_replacements(original_question, params, cf_params)
             
             elif strategy == 'question_type':
                 cf_params = params.copy() if params else {}
@@ -682,7 +916,144 @@ def create_counterfactual_questions(original_question, params, scene):
                     shape = random.choice(props['shapes'])
                     cf_params = {'color': color, 'shape': shape}
                     cf_q = f"Is there a {color} {shape}?"
-            
+
+            elif strategy == 'same_different':
+                # Attribute equivalence: "same as" / "same shape/color/material" -> swap one compared attribute or "same" -> "different"
+                q = original_question
+                q_lower = q.lower()
+                if "the same as" in q_lower or "same shape" in q_lower or "same color" in q_lower or "same material" in q_lower:
+                    if random.choice([True, False]) and params:
+                        # Swap one of the compared attributes (reuse attribute_swap logic for one key)
+                        swap_keys = [k for k in params if k in ('shape1', 'shape2', 'color', 'size', 'material', 'shape')]
+                        if swap_keys:
+                            key = random.choice(swap_keys)
+                            current = params.get(key)
+                            if key in ('shape1', 'shape2', 'shape'):
+                                alts = [s for s in props['all_shapes'] if s != current]
+                                val = random.choice(alts) if alts else current
+                            elif key in ('color', 'color1', 'color2'):
+                                alts = [c for c in props['all_colors'] if c != current]
+                                val = random.choice(alts) if alts else current
+                            elif key == 'material':
+                                alts = [m for m in props['all_materials'] if m != current]
+                                val = random.choice(alts) if alts else current
+                            elif key == 'size':
+                                alts = [s for s in props['all_sizes'] if s != current]
+                                val = random.choice(alts) if alts else current
+                            else:
+                                val = current
+                            if val != current:
+                                cf_params = params.copy()
+                                cf_params[key] = val
+                                cf_q = _apply_param_replacements(q, params, cf_params)
+                            else:
+                                cf_q = None
+                        else:
+                            cf_q = None
+                    else:
+                        # Replace "same as" with "different from" / "same" with "different"
+                        if "the same as" in q_lower:
+                            cf_q = q.replace("the same as", "different from").replace("The same as", "Different from")
+                        elif "same shape" in q_lower:
+                            cf_q = q.replace("same shape", "different shape").replace("same shape", "different shape")
+                        elif "same color" in q_lower:
+                            cf_q = q.replace("same color", "different color")
+                        elif "same material" in q_lower:
+                            cf_q = q.replace("same material", "different material")
+                        else:
+                            cf_q = q.replace("the same as", "different from")
+                        cf_params = params.copy() if params else {}
+                else:
+                    cf_q = None
+
+            elif strategy == 'either_or':
+                # "either X or Y" -> swap X or Y, or "either X or Y" -> "both X and Y"
+                q_lower = original_question.lower()
+                if "either" in q_lower and " or " in q_lower and params:
+                    if random.choice([True, False]):
+                        # Swap one of the two attributes
+                        swap_keys = [k for k in params if k in ('color', 'shape', 'material', 'size')]
+                        if swap_keys:
+                            key = random.choice(swap_keys)
+                            current = params.get(key)
+                            if key == 'shape':
+                                alts = [s for s in props['all_shapes'] if s != current]
+                                val = random.choice(alts) if alts else current
+                            elif key == 'color':
+                                alts = [c for c in props['all_colors'] if c != current]
+                                val = random.choice(alts) if alts else current
+                            elif key == 'material':
+                                alts = [m for m in props['all_materials'] if m != current]
+                                val = random.choice(alts) if alts else current
+                            elif key == 'size':
+                                alts = [s for s in props['all_sizes'] if s != current]
+                                val = random.choice(alts) if alts else current
+                            else:
+                                val = current
+                            if val != current:
+                                cf_params = params.copy()
+                                cf_params[key] = val
+                                cf_q = _apply_param_replacements(original_question, params, cf_params)
+                            else:
+                                cf_q = None
+                        else:
+                            cf_q = None
+                    else:
+                        # "either ... or" -> "both ... and"
+                        cf_q = original_question.replace("either", "both").replace(" or ", " and ")
+                        cf_params = params.copy() if params else {}
+                else:
+                    cf_q = None
+
+            elif strategy == 'equal_comparison':
+                # "equal to" / "exactly as many" -> swap one target or change to "greater than" / "fewer than"
+                q = original_question
+                q_lower = q.lower()
+                if ("equal to" in q_lower or "exactly as many" in q_lower or "equal number" in q_lower) and params:
+                    if random.choice([True, False]):
+                        # Swap one of the compared properties (color, shape, material, size, color1, color2)
+                        swap_keys = [k for k in params if k in ('color', 'color1', 'color2', 'shape', 'material', 'size')]
+                        if swap_keys:
+                            key = random.choice(swap_keys)
+                            current = params.get(key)
+                            if key in ('color', 'color1', 'color2'):
+                                alts = [c for c in props['all_colors'] if c != current]
+                                val = random.choice(alts) if alts else current
+                            elif key == 'shape':
+                                alts = [s for s in props['all_shapes'] if s != current]
+                                val = random.choice(alts) if alts else current
+                            elif key == 'material':
+                                alts = [m for m in props['all_materials'] if m != current]
+                                val = random.choice(alts) if alts else current
+                            elif key == 'size':
+                                alts = [s for s in props['all_sizes'] if s != current]
+                                val = random.choice(alts) if alts else current
+                            else:
+                                val = current
+                            if val != current:
+                                cf_params = params.copy()
+                                cf_params[key] = val
+                                cf_q = _apply_param_replacements(q, params, cf_params)
+                            else:
+                                cf_q = None
+                        else:
+                            cf_q = None
+                    else:
+                        # "equal to" -> "greater than" or "fewer than"; "equal number" -> "greater/fewer number"
+                        # ("exactly as many" left to swap-only path to avoid ungrammatical "more X as Y")
+                        if "equal to" in q_lower:
+                            direction = random.choice(["greater than", "fewer than"])
+                            cf_q = q.replace("equal to", direction).replace("Equal to", direction.capitalize())
+                            cf_params = params.copy() if params else {}
+                        elif "equal number" in q_lower:
+                            cf_q = q.replace("equal number", random.choice(["greater number", "fewer number"]))
+                            cf_params = params.copy() if params else {}
+                        else:
+                            cf_q = None
+                            cf_params = {}
+                else:
+                    cf_q = None
+
             if cf_q is None:
                 cf_q = "How many objects are in the scene?"
                 cf_params = {}
@@ -736,7 +1107,182 @@ def normalize_answer(a):
 def answer_question_for_scene(question, scene):
     objects = scene.get('objects', [])
     question_lower = question.lower()
-    
+
+    def _str_answer(val):
+        if val is None:
+            return "unknown"
+        return str(val).strip().lower()
+
+    # --- Attribute Equivalence ("same as" / "same shape/color/material") ---
+    if "the same as" in question_lower or "different from" in question_lower or "same shape" in question_lower or "same color" in question_lower or "same material" in question_lower:
+        expect_same = "different from" not in question_lower and "different shape" not in question_lower and "different color" not in question_lower and "different material" not in question_lower
+        shape1 = _first_value_in_question(question_lower, _SHAPES)
+        shape2 = None
+        for s in _SHAPES:
+            if s in question_lower and s != shape1:
+                shape2 = s.rstrip('s')
+                break
+        if shape2 is None and shape1:
+            shape2 = shape1.rstrip('s')
+        color1 = _first_value_in_question(question_lower, _COLORS)
+        size1 = _first_value_in_question(question_lower, _SIZES, strip_s=False)
+        material1 = _first_value_in_question(question_lower, _MATERIALS)
+
+        if "have the same shape" in question_lower:
+            cand_a = _find_objects_matching(objects, size=size1) if size1 else []
+            cand_b = _find_objects_matching(objects, material=material1) if material1 else []
+            if not cand_a or not cand_b:
+                return _str_answer("no" if expect_same else "yes")
+            v1 = (objects[cand_a[0]].get('shape') or '').lower()
+            v2 = (objects[cand_b[0]].get('shape') or '').lower()
+            same = (v1 == v2)
+            return _str_answer("yes" if (same == expect_same) else "no")
+
+        if "material of" in question_lower:
+            attr = 'material'
+            cand1 = _find_objects_matching(objects, color=color1) if color1 else []
+            cand2 = _find_objects_matching(objects, size=size1) if size1 else []
+        elif "color of" in question_lower or ("same as" in question_lower and shape1):
+            attr = 'color'
+            cand1 = _find_objects_matching(objects, shape=shape1.rstrip('s') if shape1 else None) if shape1 else []
+            cand2 = _find_objects_matching(objects, shape=shape2) if shape2 else []
+        else:
+            attr = 'color'
+            cand1 = _find_objects_matching(objects, shape=shape1.rstrip('s') if shape1 else None) if shape1 else _find_objects_matching(objects, color=color1) if color1 else []
+            cand2 = _find_objects_matching(objects, shape=shape2) if shape2 else _find_objects_matching(objects, size=size1) if size1 else []
+        if not cand1 or not cand2:
+            return _str_answer("no" if expect_same else "yes")
+        v1 = (objects[cand1[0]].get(attr) or '').lower()
+        v2 = (objects[cand2[0]].get(attr) or '').lower()
+        if not v1 or not v2:
+            return _str_answer("unknown")
+        same = (v1 == v2)
+        return _str_answer("yes" if (same == expect_same) else "no")
+
+    # --- Logical Disjunction ("either X or Y") ---
+    if "either" in question_lower and " or " in question_lower:
+        color_val = _first_value_in_question(question_lower, _COLORS)
+        shape_val = _first_value_in_question(question_lower, _SHAPES)
+        material_val = _first_value_in_question(question_lower, _MATERIALS)
+        size_val = _first_value_in_question(question_lower, _SIZES, strip_s=False)
+        count = 0
+        for obj in objects:
+            c = (obj.get('color') or '').lower()
+            s = (obj.get('shape') or '').lower()
+            m = (obj.get('material') or '').lower()
+            z = (obj.get('size') or '').lower()
+            match = False
+            if color_val and c == color_val.rstrip('s'):
+                match = True
+            if shape_val and (s == shape_val.rstrip('s') or s + 's' == shape_val):
+                match = True
+            if material_val and m == material_val.rstrip('s'):
+                match = True
+            if size_val and z == size_val:
+                match = True
+            if match:
+                count += 1
+        if "are there any" in question_lower:
+            return _str_answer("yes" if count > 0 else "no")
+        return _str_answer(str(count))
+
+    # --- Exact Numerical Comparison ("equal to", "exactly as many", "equal number") ---
+    if "equal to" in question_lower or "exactly as many" in question_lower or "equal number" in question_lower:
+        def _count_for_value(attr_kind, val):
+            if not val:
+                return None
+            if attr_kind == 'color':
+                return sum(1 for o in objects if (o.get('color') or '').lower() == val.rstrip('s'))
+            if attr_kind == 'shape':
+                return sum(1 for o in objects if (o.get('shape') or '').lower() == val.rstrip('s'))
+            if attr_kind == 'material':
+                return sum(1 for o in objects if (o.get('material') or '').lower() == val.rstrip('s'))
+            if attr_kind == 'size':
+                return sum(1 for o in objects if (o.get('size') or '').lower() == val)
+            return None
+
+        def _parse_one_category(phrase):
+            for c in _COLORS:
+                if c in phrase:
+                    return ('color', c.rstrip('s'))
+            for s in _SHAPES:
+                if s in phrase:
+                    return ('shape', s.rstrip('s'))
+            for m in _MATERIALS:
+                if m in phrase:
+                    return ('material', m.rstrip('s'))
+            for z in _SIZES:
+                if z in phrase:
+                    return ('size', z)
+            return (None, None)
+
+        if "number of" in question_lower and "objects and" in question_lower:
+            parts = question_lower.split("and")
+            if len(parts) >= 2:
+                kind1, v1 = _parse_one_category(parts[0])
+                kind2, v2 = _parse_one_category(parts[1])
+                if kind1 and kind2:
+                    n1 = _count_for_value(kind1, v1)
+                    n2 = _count_for_value(kind2, v2)
+                    if n1 is not None and n2 is not None:
+                        return _str_answer("yes" if n1 == n2 else "no")
+        if "equal to" in question_lower:
+            left, _, right = question_lower.partition("equal to")
+            kind1, v1 = _parse_one_category(left)
+            kind2, v2 = _parse_one_category(right)
+            if kind1 and kind2:
+                n1 = _count_for_value(kind1, v1)
+                n2 = _count_for_value(kind2, v2)
+                if n1 is not None and n2 is not None:
+                    return _str_answer("yes" if n1 == n2 else "no")
+        if "exactly as many" in question_lower:
+            parts = re.split(r'exactly as many\s+', question_lower)
+            if len(parts) >= 2:
+                rest = parts[1]
+                parts2 = re.split(r'\s+as\s+', rest, maxsplit=1)
+                if len(parts2) >= 2:
+                    kind1, v1 = _parse_one_category(parts2[0])
+                    kind2, v2 = _parse_one_category(parts2[1])
+                    if kind1 and kind2:
+                        n1 = _count_for_value(kind1, v1)
+                        n2 = _count_for_value(kind2, v2)
+                        if n1 is not None and n2 is not None:
+                            return _str_answer("yes" if n1 == n2 else "no")
+        return _str_answer("unknown")
+
+    # --- Complex Spatial (X objects {relation} the Y) ---
+    for rel_phrase in PHRASES_TO_RELATION_KEYS:
+        if rel_phrase in question_lower and ("objects " in question_lower or "object " in question_lower):
+            before_rel, _, after_rel = question_lower.partition(rel_phrase)
+            ref_color = _first_value_in_question(after_rel, _COLORS)
+            ref_shape = _first_value_in_question(after_rel, _SHAPES)
+            ref_material = _first_value_in_question(after_rel, _MATERIALS)
+            ref_size = _first_value_in_question(after_rel, _SIZES, strip_s=False)
+            in_rel = _objects_in_relation_to_reference(scene, rel_phrase, ref_color=ref_color, ref_shape=ref_shape, ref_material=ref_material, ref_size=ref_size)
+            filter_color = _first_value_in_question(before_rel, _COLORS)
+            filter_shape = _first_value_in_question(before_rel, _SHAPES)
+            filter_material = _first_value_in_question(before_rel, _MATERIALS)
+            filter_size = _first_value_in_question(before_rel, _SIZES, strip_s=False)
+            filtered = 0
+            for idx in in_rel:
+                if idx >= len(objects):
+                    continue
+                o = objects[idx]
+                if filter_color and (o.get('color') or '').lower() != filter_color.rstrip('s'):
+                    continue
+                if filter_shape and (o.get('shape') or '').lower() != filter_shape.rstrip('s'):
+                    continue
+                if filter_material and (o.get('material') or '').lower() != filter_material.rstrip('s'):
+                    continue
+                if filter_size and (o.get('size') or '').lower() != filter_size:
+                    continue
+                filtered += 1
+            if "how many" in question_lower or "total number" in question_lower:
+                return _str_answer(str(filtered))
+            if "is there a" in question_lower or "are there any" in question_lower:
+                return _str_answer("yes" if filtered > 0 else "no")
+            break
+
     if "at least" in question_lower:
         match = re.search(r'at least (\d+)', question_lower)
         if match:
@@ -844,42 +1390,34 @@ def answer_question_for_scene(question, scene):
     if "matte or shiny" in question_lower or ("or" in question_lower and ("matte" in question_lower or "shiny" in question_lower)):
         colors = ['red', 'blue', 'green', 'brown', 'purple', 'cyan', 'yellow', 'gray', 'grey']
         shapes = ['cube', 'sphere', 'cylinder', 'cubes', 'spheres', 'cylinders']
-        
         color_match = None
         shape_match = None
-        
         for c in colors:
             if c in question_lower:
                 color_match = c.rstrip('s')
                 break
-        
         for s in shapes:
             if s in question_lower:
                 shape_match = s.rstrip('s')
                 break
-        
         for obj in objects:
-            obj_color = obj.get('color', '').lower()
-            obj_shape = obj.get('shape', '').lower()
-            obj_material = obj.get('material', '').lower()
-            
+            obj_color = (obj.get('color') or '').lower()
+            obj_shape = (obj.get('shape') or '').lower()
+            obj_material = (obj.get('material') or '').lower()
             matches = True
             if color_match and obj_color != color_match:
                 matches = False
             if shape_match and obj_shape != shape_match:
                 matches = False
-            
             if matches:
                 if obj_material == 'metal':
                     return "shiny"
-                elif obj_material == 'rubber':
+                if obj_material == 'rubber':
                     return "matte"
-                else:
-                    return "unknown"
-        
-        return "not found"
+        # Object not in this scene (e.g. CF removed it); answer without "none" or "not found"
+        return _str_answer("unknown")
     
-    return "unknown"
+    return _str_answer("unknown")
 
 def count_matching_objects(question_lower, objects):
     count = 0
@@ -951,7 +1489,7 @@ def classify_question_validity(question, base_scene_graph, counterfactual_scene_
 
 def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_questions.csv',
                                    generate_questions=False, with_links=False, base_url=None,
-                                   strict_question_validation=True):
+                                   strict_question_validation=True, single_cf_per_row=False):
     images_dir = os.path.join(run_dir, 'images')
     scenes_dir = os.path.join(run_dir, 'scenes')
     
@@ -1021,10 +1559,112 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
                     'counterfactual1_type', 'counterfactual2_type',
                     'counterfactual1_description', 'counterfactual2_description'])
     
+    if single_cf_per_row:
+        if with_links:
+            h = ['scene_id', 'original_image_link', 'original_scene_link', 'counterfactual_image_link', 'counterfactual_scene_link', 'counterfactual_type', 'counterfactual_description']
+            if generate_questions:
+                h.extend(['original_question', 'counterfactual_question', 'original_question_difficulty', 'counterfactual_question_difficulty',
+                         'original_image_answer_to_original_question', 'original_image_answer_to_cf_question',
+                         'cf_image_answer_to_original_question', 'cf_image_answer_to_cf_question'])
+            rows = [h]
+        elif generate_questions:
+            rows = [['original_image', 'counterfactual_image', 'counterfactual_type', 'counterfactual_description',
+                     'original_question', 'counterfactual_question', 'original_question_difficulty', 'counterfactual_question_difficulty',
+                     'original_image_answer_to_original_question', 'original_image_answer_to_cf_question',
+                     'cf_image_answer_to_original_question', 'cf_image_answer_to_cf_question']]
+        else:
+            rows = [['original_image', 'counterfactual_image', 'counterfactual_type', 'counterfactual_description']]
+    
     total_scenes = len(scene_sets)
     
     for idx, scene_num in enumerate(sorted(scene_sets.keys())):
         scene_data = scene_sets[scene_num]
+        cf_keys = sorted([k for k in scene_data if k.startswith('cf') and len(k) > 2 and k[2:].isdigit()], key=lambda x: int(x[2:]))
+        
+        if single_cf_per_row:
+            if 'original' not in scene_data or len(cf_keys) < 1:
+                continue
+            original_id = scene_data['original']
+            for cf_key in cf_keys:
+                cf_id = scene_data[cf_key]
+                original_scene_file = find_scene_file(scenes_dir, original_id)
+                cf_scene_file = find_scene_file(scenes_dir, cf_id)
+                if not original_scene_file or not cf_scene_file:
+                    continue
+                try:
+                    original_scene = load_scene(original_scene_file)
+                    cf_scene = load_scene(cf_scene_file)
+                    cf_type = get_cf_type_from_scene(cf_scene) or ''
+                    cf_description = get_cf_description_from_scene(cf_scene) or ''
+                except Exception:
+                    continue
+                if generate_questions:
+                    appended = False
+                    for cf_retry in range(MAX_CF_ANSWER_RETRIES):
+                        try:
+                            original_question, params = generate_question_for_scene(original_scene_file, retry_index=cf_retry)
+                            original_ans_orig = answer_question_for_scene(original_question, original_scene)
+                            cf_question, cf_params = generate_question_for_counterfactual(
+                                cf_type, original_scene, cf_scene, retry_index=cf_retry,
+                                original_question=original_question, original_params=params
+                            )
+                            if cf_question is None or cf_params is None:
+                                continue
+                            # Matte/shin can yield "unknown" when the object is removed; only allow for attribute-swap CFs.
+                            if "matte or shiny" in (original_question or "").lower() and cf_type in ("add_object", "remove_object"):
+                                continue
+                            original_ans_cf_q = answer_question_for_scene(cf_question, original_scene)
+                            cf_ans_orig_q = answer_question_for_scene(original_question, cf_scene)
+                            cf_ans_cf_q = answer_question_for_scene(cf_question, cf_scene)
+                            orig_diff = calculate_question_difficulty(original_question, params)
+                            cf_diff = calculate_question_difficulty(cf_question, cf_params)
+                        except Exception:
+                            continue
+                        # Answers must change between original and counterfactual images for both questions.
+                        if normalize_answer(original_ans_orig) == normalize_answer(cf_ans_orig_q):
+                            continue
+                        if strict_question_validation:
+                            validity = classify_question_validity(cf_question, original_scene, cf_scene)
+                            required = 'Semantic-Valid' if (cf_type and cf_type in IMAGE_CF_TYPES) else 'Negative-Valid'
+                            if validity != required:
+                                continue
+                        else:
+                            if normalize_answer(original_ans_cf_q) == normalize_answer(cf_ans_cf_q):
+                                continue
+                        if with_links:
+                            def _link(fn, ft='image'):
+                                return f"{base_url.rstrip('/')}/{ft}s/{fn}" if base_url else f"{ft}s/{fn}"
+                            rows.append([
+                                scene_num,
+                                _link(original_id, 'image'), _link(original_id.replace('.png', '.json'), 'scene'),
+                                _link(cf_id, 'image'), _link(cf_id.replace('.png', '.json'), 'scene'),
+                                cf_type, cf_description,
+                                original_question, cf_question, orig_diff, cf_diff,
+                                original_ans_orig, original_ans_cf_q, cf_ans_orig_q, cf_ans_cf_q
+                            ])
+                        else:
+                            rows.append([
+                                original_id, cf_id, cf_type, cf_description,
+                                original_question, cf_question, orig_diff, cf_diff,
+                                original_ans_orig, original_ans_cf_q, cf_ans_orig_q, cf_ans_cf_q
+                            ])
+                        appended = True
+                        break
+                    if not appended and generate_questions:
+                        pass  # skip this (original, CF) pair after MAX_CF_ANSWER_RETRIES
+                else:
+                    if with_links:
+                        def _link(fn, ft='image'):
+                            return f"{base_url.rstrip('/')}/{ft}s/{fn}" if base_url else f"{ft}s/{fn}"
+                        rows.append([
+                            scene_num,
+                            _link(original_id, 'image'), _link(original_id.replace('.png', '.json'), 'scene'),
+                            _link(cf_id, 'image'), _link(cf_id.replace('.png', '.json'), 'scene'),
+                            cf_type, cf_description
+                        ])
+                    else:
+                        rows.append([original_id, cf_id, cf_type, cf_description])
+            continue
         
         if 'original' not in scene_data or 'cf1' not in scene_data or 'cf2' not in scene_data:
             print(f"WARNING: Scene {scene_num} missing images")
@@ -1077,13 +1717,26 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
                     random.seed(hash((scene_num, idx, cf_retry)))
                     cf_questions = create_counterfactual_questions(original_question, params, original_scene) if (not cf1_type or not cf2_type) else None
                     if cf1_type:
-                        cf1_question, cf1_params = generate_question_for_counterfactual(cf1_type, original_scene, cf1_scene, retry_index=cf_retry)
+                        cf1_question, cf1_params = generate_question_for_counterfactual(
+                            cf1_type, original_scene, cf1_scene, retry_index=cf_retry,
+                            original_question=original_question, original_params=params
+                        )
+                        if cf1_question is None or cf1_params is None:
+                            continue
                     else:
                         cf1_question, cf1_params = cf_questions[0] if cf_questions and len(cf_questions) > 0 else ("How many objects are in the scene?", {})
                     if cf2_type:
-                        cf2_question, cf2_params = generate_question_for_counterfactual(cf2_type, original_scene, cf2_scene, retry_index=cf_retry)
+                        cf2_question, cf2_params = generate_question_for_counterfactual(
+                            cf2_type, original_scene, cf2_scene, retry_index=cf_retry,
+                            original_question=original_question, original_params=params
+                        )
+                        if cf2_question is None or cf2_params is None:
+                            continue
                     else:
                         cf2_question, cf2_params = cf_questions[1] if cf_questions and len(cf_questions) > 1 else (cf_questions[0] if cf_questions else ("How many objects are in the scene?", {}))
+                    # Matte/shin can yield "unknown" when the object is removed; only allow for attribute-swap CFs.
+                    if "matte or shiny" in (original_question or "").lower() and (cf1_type in ("add_object", "remove_object") or cf2_type in ("add_object", "remove_object")):
+                        continue
                 except Exception as e:
                     import traceback
                     traceback.print_exc()
@@ -1111,7 +1764,10 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
                     import traceback
                     traceback.print_exc()
                     continue
-                
+                # Original question answer must change between original and each counterfactual image.
+                orig_n = normalize_answer(original_ans_orig_q)
+                if orig_n == normalize_answer(cf1_ans_orig_q) or orig_n == normalize_answer(cf2_ans_orig_q):
+                    continue
                 if strict_question_validation:
                     cf1_validity = classify_question_validity(cf1_question, original_scene, cf1_scene)
                     cf2_validity = classify_question_validity(cf2_question, original_scene, cf2_scene)
@@ -1122,9 +1778,9 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
                     if cf1_ok and cf2_ok:
                         break
                 else:
-                    CF_TYPES_ACCEPT_WITHOUT_CHECK = {'change_position', 'swap_attribute', 'relational_flip'}
-                    cf1_differs = (cf1_type not in IMAGE_CF_TYPES) or (cf1_type in CF_TYPES_ACCEPT_WITHOUT_CHECK) or (normalize_answer(original_ans_cf1_q) != normalize_answer(cf1_ans_cf1_q))
-                    cf2_differs = (cf2_type not in IMAGE_CF_TYPES) or (cf2_type in CF_TYPES_ACCEPT_WITHOUT_CHECK) or (normalize_answer(original_ans_cf2_q) != normalize_answer(cf2_ans_cf2_q))
+                    # change_position, swap_attribute, relational_flip now use strict spatial/compositional routing and must pass Semantic-Valid.
+                    cf1_differs = (cf1_type not in IMAGE_CF_TYPES) or (normalize_answer(original_ans_cf1_q) != normalize_answer(cf1_ans_cf1_q))
+                    cf2_differs = (cf2_type not in IMAGE_CF_TYPES) or (normalize_answer(original_ans_cf2_q) != normalize_answer(cf2_ans_cf2_q))
                     if cf1_differs or cf2_differs:
                         break
             else:
@@ -1220,12 +1876,21 @@ def generate_mapping_with_questions(run_dir, csv_filename='image_mapping_with_qu
         return
     
     print(f"\n[OK] Generated mapping CSV: {csv_path}")
-    print(f"  Total scene sets: {len(rows) - 1}")
+    print(f"  Total rows: {len(rows) - 1}")
     
     print("\nSample entry:")
     if len(rows) > 1:
         row = rows[1]
-        if with_links:
+        if single_cf_per_row:
+            if generate_questions and len(row) >= 12:
+                print(f"  Images: Original: {row[0]}, Counterfactual: {row[1]}")
+                print(f"  CF type / description: {row[2]}, {row[3]!r}")
+                print(f"  Questions: Original: {row[4]}, CF: {row[5]}")
+                print(f"  Answers: orig→orig_q: {row[8]}, orig→cf_q: {row[9]}, cf→orig_q: {row[10]}, cf→cf_q: {row[11]}")
+            elif len(row) >= 4:
+                print(f"  Images: Original: {row[0]}, Counterfactual: {row[1]}")
+                print(f"  CF type / description: {row[2]}, {row[3]!r}")
+        elif with_links:
             if generate_questions:
                 print(f"  Scene ID: {row[0]}")
                 print(f"  Links:")
@@ -1267,6 +1932,8 @@ def main():
                        help='Generate questions and answers for each scene set')
     parser.add_argument('--no_strict_validation', action='store_true',
                        help='Disable strict question validation (Semantic-Valid / Negative-Valid classifier); use legacy accept logic')
+    parser.add_argument('--single_cf_per_row', action='store_true',
+                       help='Emit one row per (original, single counterfactual) instead of one row per (original, cf1, cf2). CSV columns: original_image, counterfactual_image, counterfactual_type, counterfactual_description [, + Q&A if --generate_questions].')
     
     args = parser.parse_args()
     
@@ -1291,7 +1958,8 @@ def main():
         run_dir,
         args.csv_name,
         args.generate_questions,
-        strict_question_validation=not args.no_strict_validation
+        strict_question_validation=not args.no_strict_validation,
+        single_cf_per_row=getattr(args, 'single_cf_per_row', False)
     )
 
 if __name__ == '__main__':

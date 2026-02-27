@@ -592,6 +592,9 @@ def cf_swap_attribute(scene):
 
 
 TARGET_OCCLUSION_COVERAGE = 0.6
+# Lateral offset as fraction of combined radius: occluder placed to the SIDE of target
+# so only part of target is hidden (partial occlusion), not fully behind occluder.
+OCCLUSION_LATERAL_FRACTIONS = (0.35, 0.5, 0.65, 0.25, 0.45)
 
 
 def cf_occlusion_change(scene):
@@ -604,6 +607,9 @@ def cf_occlusion_change(scene):
     front = directions.get('front', [0.75, -0.66, 0.0])
     if len(front) < 2:
         front = [0.75, -0.66]
+    left = directions.get('left', [-0.66, -0.75, 0.0])
+    if len(left) < 2:
+        left = [-0.66, -0.75]
     
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -632,10 +638,12 @@ def cf_occlusion_change(scene):
         return -2.8 <= new_x <= 2.8 and -2.8 <= new_y <= 2.8
     
     fx, fy = float(front[0]), float(front[1])
-    norm = math.sqrt(fx * fx + fy * fy) or 1.0
-    coverage_range = 0.5
-    delta_max = coverage_range * (1.0 - TARGET_OCCLUSION_COVERAGE)
-    base_deltas = [0.02, 0.05, 0.08, 0.12, 0.18, delta_max * 0.5, delta_max]
+    fnorm = math.sqrt(fx * fx + fy * fy) or 1.0
+    lx, ly = float(left[0]), float(left[1])
+    lnorm = math.sqrt(lx * lx + ly * ly) or 1.0
+    # Forward offset: occluder between camera and target, but not jammed on top
+    forward_base = 0.25
+    forward_deltas = [0.0, 0.05, 0.1, 0.15, 0.2]
     
     pairs = [(i, j) for i in range(len(cf_scene['objects'])) for j in range(len(cf_scene['objects'])) if i != j]
     random.shuffle(pairs)
@@ -647,16 +655,21 @@ def cf_occlusion_change(scene):
         oz = occluder['3d_coords'][2]
         occluder_r = get_radius(occluder)
         target_r = get_radius(target)
-        min_offset = occluder_r + target_r + min_dist
-        offsets = [min_offset + d for d in base_deltas]
-        
-        for offset in offsets:
-            new_x = tx + (fx / norm) * offset
-            new_y = ty + (fy / norm) * offset
-            if is_valid_occlusion_pos(cf_scene, occluder_idx, target_idx, new_x, new_y, occluder_r):
-                occluder['3d_coords'] = [new_x, new_y, oz]
-                occluder['pixel_coords'] = [0, 0, 0]
-                return cf_scene, f"moved {occluder['color']} {occluder['shape']} to partially occlude {target['color']} {target['shape']}"
+        combined = occluder_r + target_r + min_dist
+        # Lateral offset so occluder is to the side → partial overlap in camera view
+        for lateral_frac in OCCLUSION_LATERAL_FRACTIONS:
+            lateral = lateral_frac * combined
+            for sign in (1, -1):
+                lat_x = (lx / lnorm) * (lateral * sign)
+                lat_y = (ly / lnorm) * (lateral * sign)
+                for fdelta in forward_deltas:
+                    forward = forward_base + fdelta
+                    new_x = tx + (fx / fnorm) * forward + lat_x
+                    new_y = ty + (fy / fnorm) * forward + lat_y
+                    if is_valid_occlusion_pos(cf_scene, occluder_idx, target_idx, new_x, new_y, occluder_r):
+                        occluder['3d_coords'] = [new_x, new_y, oz]
+                        occluder['pixel_coords'] = [0, 0, 0]
+                        return cf_scene, f"moved {occluder['color']} {occluder['shape']} to partially occlude {target['color']} {target['shape']}"
     
     return cf_scene, "no occlusion (couldn't find valid position)"
 
@@ -2158,13 +2171,15 @@ def main():
             try:
                 generate_mapping_with_questions(
                     run_dir,
-                    args.csv_name,
+                    args.csv_name if args.num_counterfactuals != 1 else 'image_mapping_single_cf.csv',
                     generate_questions=True,
-                    strict_question_validation=not getattr(args, 'no_strict_validation', False)
+                    strict_question_validation=not getattr(args, 'no_strict_validation', False),
+                    single_cf_per_row=(args.num_counterfactuals == 1)
                 )
-                print(f"\n[OK] CSV saved to: {os.path.join(run_dir, args.csv_name)}")
+                csv_used = args.csv_name if args.num_counterfactuals != 1 else 'image_mapping_single_cf.csv'
+                print(f"\n[OK] CSV saved to: {os.path.join(run_dir, csv_used)}")
                 if getattr(args, 'filter_same_answer', False):
-                    filter_same_answer_scenes(run_dir, args.csv_name)
+                    filter_same_answer_scenes(run_dir, csv_used)
             except Exception as e:
                 print(f"\n[ERROR] Questions: {e}")
                 import traceback

@@ -309,6 +309,16 @@ For evaluation and datasets, the **counterfactual image’s answer to its counte
 
 - **Optional:** To allow more attempts per scene, edit `scripts/generate_questions_mapping.py` and increase **`MAX_CF_ANSWER_RETRIES`** (e.g. from 50 to 100). No CLI flag is exposed for this.
 
+**720p dataset with different answers (distinct CF types per scene):**
+
+- Scenes use **two distinct counterfactual types** per scene (no duplicate CF type for CF1 and CF2). To generate a 720p (1280×720) set with question/answer validation and optional removal of scenes where the CF answer matches the original:
+
+  ```bash
+  python pipeline.py --num_scenes 1000 --output_dir output --run_name dataset_720p_diff --width 1280 --height 720 --semantic_only --num_counterfactuals 2 --generate_questions --filter_same_answer
+  ```
+
+- This produces `output/dataset_720p_diff/` with scene sets where CF1 and CF2 use different types, questions are validated (original + CFs), and rows where the CF image’s answer to the CF question matches the original are removed. Increase `MAX_CF_ANSWER_RETRIES` in `scripts/generate_questions_mapping.py` if you want fewer “could not find valid questions” warnings.
+
 
 ## Project Structure
 

@@ -144,4 +144,3 @@ docker run --rm -it -v ${PWD}/output:/app/output counterfactual-generator /bin/b
 - The image includes Blender 4.3, which is compatible with the codebase
 - Credentials and tokens are excluded from the Docker image for security
 - Output files are stored in the mounted volume to persist data
-

@@ -377,21 +377,21 @@ output/
 ### Dataset columns (high level)
 
 **Wide Format CSV** (default with `--generate_questions`):
-- **Image columns**: `original_image`, `counterfactual1_image`, `counterfactual2_image`
-- **Question columns**: `original_question`, `counterfactual1_question`, `counterfactual2_question`
+- **Image columns**: `original_image`, `semantic_counterfactual_image`, `negative_counterfactual_image`
+- **Question columns**: `original_question`, `semantic_counterfactual_question_1`, `negative_counterfactual_question_1`
 - **Answer matrix columns** (9 total, showing each image's answer to each question):
   - `original_image_answer_to_original_question`
-  - `original_image_answer_to_cf1_question`
-  - `original_image_answer_to_cf2_question`
-  - `cf1_image_answer_to_original_question`
-  - `cf1_image_answer_to_cf1_question`
-  - `cf1_image_answer_to_cf2_question`
-  - `cf2_image_answer_to_original_question`
-  - `cf2_image_answer_to_cf1_question`
-  - `cf2_image_answer_to_cf2_question`
+  - `original_image_answer_to_semantic_counterfactual_question_1`
+  - `original_image_answer_to_negative_counterfactual_question_1`
+  - `semantic_counterfactual_image_answer_to_original_question`
+  - `semantic_counterfactual_image_answer_to_semantic_counterfactual_question_1`
+  - `semantic_counterfactual_image_answer_to_negative_counterfactual_question_1`
+  - `negative_counterfactual_image_answer_to_original_question`
+  - `negative_counterfactual_image_answer_to_semantic_counterfactual_question_1`
+  - `negative_counterfactual_image_answer_to_negative_counterfactual_question_1`
 
 **Basic Format CSV** (without `--generate_questions`):
-- Only image columns: `original_image`, `counterfactual1_image`, `counterfactual2_image`
+- Only image columns: `original_image`, `semantic_counterfactual_image`, `negative_counterfactual_image`
 
 ## Code Style
 

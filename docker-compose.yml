@@ -9,11 +9,8 @@ services:
     ports:
       - "8501:8501"
     volumes:
-      # Mount data directory if needed
       - ./data:/app/data:ro
-      # Mount output directory for persistence
       - ./output:/app/output
-      # Mount temp output directory
       - ./temp_output:/app/temp_output
     environment:
       - PYTHONUNBUFFERED=1

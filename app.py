@@ -238,7 +238,7 @@ def generate_counterfactual_scenes(num_scenes, num_objects, min_objects, max_obj
                 print(f'  Blender path: {blender_path}')
                 print(f'  Base scene: {base_scene is not None}')
                 if base_scene:
-                    print(f'  Objects in scene: {len(base_scene.get('objects', []))}')
+                    print(f"  Objects in scene: {len(base_scene.get('objects', []))}")
                 error_messages.append(error_detail)
                 continue
             successful_scenes += 1

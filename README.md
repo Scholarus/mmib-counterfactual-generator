@@ -393,16 +393,6 @@ output/
 **Basic Format CSV** (without `--generate_questions`):
 - Only image columns: `original_image`, `semantic_counterfactual_image`, `negative_counterfactual_image`
 
-## Data Curation Note
-
-For reporting-ready experiments, use the curated subset:
-
-- `output/dataset_720p_v2_clean800`
-- `800` scene triplets (`original`, `cf1`, `cf2`) with matching `images/`, `scenes/`, and `image_mapping_with_questions.csv`
-- Deterministic selection rule: keep valid, non-backfilled scene IDs in ascending order until 800 are collected
-
-The subset excludes IDs that were previously backfilled during intermediate dataset assembly. Final experiments and metrics should be run on this curated subset for clean provenance and reproducibility.
-
 ## Code Style
 
 The codebase follows a clean, consistent style:

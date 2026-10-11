@@ -11,15 +11,23 @@ import time
 import math
 import glob
 import zipfile
+import hashlib
 from datetime import datetime
 from pathlib import Path
 script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(script_dir, 'scripts'))
 try:
-    from generate_questions_mapping import generate_mapping_with_questions, precheck_dual_cf_questions_viable
+    from generate_questions_mapping import (
+        generate_mapping_with_questions,
+        precheck_dual_cf_questions_viable,
+        reset_acceptance_stats,
+        write_acceptance_stats,
+    )
 except ImportError:
     generate_mapping_with_questions = None
     precheck_dual_cf_questions_viable = None
+    reset_acceptance_stats = None
+    write_acceptance_stats = None
 QUESTION_PRECHECK_MAX_SCENE_ATTEMPTS = 60
 
 def find_blender():
@@ -649,7 +657,43 @@ def cf_change_lighting(scene):
     cf_scene['lighting'] = new_lighting
     return (cf_scene, f'changed lighting to {new_lighting}')
 
-def cf_add_noise(scene, min_noise_level='light'):
+def _stable_noise_seed(*parts):
+    """Process-stable seed (unlike hash(), which is randomized per interpreter)."""
+    h = hashlib.md5()
+    for p in parts:
+        h.update(repr(p).encode('utf-8'))
+        h.update(b'\0')
+    return int(h.hexdigest()[:16], 16)
+
+NOISE_AMOUNTS = {'light': 10, 'medium': 25, 'heavy': 50}
+
+def apply_noise_to_image(img, noise_level='medium', noise_seed=0):
+    """Apply seeded RGB grain to a PIL image; returns a new RGB image."""
+    from PIL import Image
+    noise_amount = NOISE_AMOUNTS.get(noise_level, 20)
+    rgb = img.convert('RGB')
+    try:
+        import numpy as np
+        arr = np.asarray(rgb, dtype=np.int16)
+        rng = np.random.default_rng(int(noise_seed))
+        noise = rng.integers(-noise_amount, noise_amount + 1, size=arr.shape, dtype=np.int16)
+        out = np.clip(arr + noise, 0, 255).astype(np.uint8)
+        return Image.fromarray(out, mode='RGB')
+    except ImportError:
+        rng = random.Random(int(noise_seed))
+        out = rgb.copy()
+        pixels = out.load()
+        width, height = out.size
+        for y in range(height):
+            for x in range(width):
+                r, g, b = pixels[x, y]
+                r = max(0, min(255, r + rng.randint(-noise_amount, noise_amount)))
+                g = max(0, min(255, g + rng.randint(-noise_amount, noise_amount)))
+                b = max(0, min(255, b + rng.randint(-noise_amount, noise_amount)))
+                pixels[x, y] = (r, g, b)
+        return out
+
+def cf_add_noise(scene, min_noise_level='light', noise_seed=None, noise_level=None, variant_index=0):
     cf_scene = copy.deepcopy(scene)
     noise_levels = ['light', 'medium', 'heavy']
     noise_weights = {'light': 0, 'medium': 1, 'heavy': 2}
@@ -659,8 +703,18 @@ def cf_add_noise(scene, min_noise_level='light'):
     choices = [n for n in valid_levels if n != current] if current in valid_levels else valid_levels
     if not choices:
         choices = [min_noise_level] if min_noise_level in noise_levels else ['medium']
-    cf_scene['noise_level'] = random.choice(choices)
-    return (cf_scene, f'added {cf_scene['noise_level']} noise (min: {min_noise_level})')
+    objects_key = json.dumps(cf_scene.get('objects', []), sort_keys=True, default=str)
+    level_seed = _stable_noise_seed(objects_key, min_noise_level, 'add_noise', variant_index)
+    rng = random.Random(level_seed)
+    if noise_level in noise_levels:
+        cf_scene['noise_level'] = noise_level
+    else:
+        cf_scene['noise_level'] = rng.choice(choices)
+    if noise_seed is not None:
+        cf_scene['noise_seed'] = int(noise_seed)
+    else:
+        cf_scene['noise_seed'] = _stable_noise_seed(objects_key, cf_scene['noise_level'], 'pixel_noise', variant_index)
+    return (cf_scene, f"added {cf_scene['noise_level']} noise (seed={cf_scene['noise_seed']}, min: {min_noise_level})")
 
 def cf_apply_fisheye(scene):
     cf_scene = copy.deepcopy(scene)
@@ -769,7 +823,7 @@ def generate_counterfactuals(scene, num_counterfactuals=2, cf_types=None, same_c
         for attempt in range(cap):
             attempts = attempt + 1
             if cf_func == cf_add_noise:
-                candidate_scene, candidate_desc = cf_func(scene, min_noise_level=min_noise_level)
+                candidate_scene, candidate_desc = cf_func(scene, min_noise_level=min_noise_level, variant_index=attempt)
             else:
                 candidate_scene, candidate_desc = cf_func(scene)
             if candidate_scene is None or not isinstance(candidate_scene, dict):
@@ -1002,22 +1056,10 @@ def render_scene(blender_path, scene_file, output_image, use_gpu=0, samples=512,
                                 out_pixels[x, y] = (r, g, b)
                         img = output
                     if noise_level:
-                        import random
-                        noise_amounts = {'light': 10, 'medium': 25, 'heavy': 50}
-                        noise_amount = noise_amounts.get(noise_level, 20)
-                        img = img.convert('RGB')
-                        pixels = img.load()
-                        width, height = img.size
-                        for y in range(height):
-                            for x in range(width):
-                                r, g, b = pixels[x, y]
-                                noise_r = random.randint(-noise_amount, noise_amount)
-                                noise_g = random.randint(-noise_amount, noise_amount)
-                                noise_b = random.randint(-noise_amount, noise_amount)
-                                r = max(0, min(255, r + noise_r))
-                                g = max(0, min(255, g + noise_g))
-                                b = max(0, min(255, b + noise_b))
-                                pixels[x, y] = (r, g, b)
+                        noise_seed = scene_data.get('noise_seed')
+                        if noise_seed is None:
+                            noise_seed = _stable_noise_seed(os.path.abspath(scene_file), noise_level, 'pixel_noise')
+                        img = apply_noise_to_image(img, noise_level=noise_level, noise_seed=noise_seed)
                     img.save(output_image_abs)
                 except ImportError:
                     pass
@@ -1271,6 +1313,8 @@ def regenerate_scene_sets(args):
     temp_run_id = os.path.basename(run_dir)
     checkpoint_file = os.path.join(run_dir, 'checkpoint.json')
     completed_scenes = load_checkpoint(checkpoint_file)
+    if reset_acceptance_stats is not None:
+        reset_acceptance_stats()
     for i in scene_indices:
         print(f'\n{'=' * 70}')
         print(f'REGENERATING SCENE SET #{i}')
@@ -1304,15 +1348,15 @@ def regenerate_scene_sets(args):
                 continue
             for idx, cf in enumerate(counterfactuals):
                 print(f'    CF{idx + 1} [{cf.get('cf_category', '?')}] ({cf.get('type', '?')}): {cf.get('description', '')}')
-            if locked_cf_types is None and len(counterfactuals) == num_counterfactuals:
-                locked_cf_types = [cf.get('type') for cf in counterfactuals]
             use_question_precheck = args.generate_questions and precheck_dual_cf_questions_viable is not None and (not getattr(args, 'no_question_precheck', False)) and (num_counterfactuals == 2)
             if use_question_precheck:
                 bo, c1, c2 = _scenes_with_metadata_for_precheck(base_scene, counterfactuals, scene_prefix)
-                ok, msg = precheck_dual_cf_questions_viable(bo, c1, c2, scene_index=i, strict_question_validation=not getattr(args, 'no_strict_validation', False), enforce_cf_question_group=True)
+                ok, msg = precheck_dual_cf_questions_viable(bo, c1, c2, scene_index=i, strict_question_validation=not getattr(args, 'no_strict_validation', False), enforce_cf_question_group=True, max_retries=150)
                 if not ok:
                     print(f'  [PRECHECK] No viable Q&A for mapping CSV ({msg}); resampling scene (attempt {precheck_attempt + 1}/{QUESTION_PRECHECK_MAX_SCENE_ATTEMPTS})...')
                     continue
+            if locked_cf_types is None and len(counterfactuals) == num_counterfactuals:
+                locked_cf_types = [cf.get('type') for cf in counterfactuals]
             scene_ready = True
             break
         if not base_scene or len(base_scene.get('objects', [])) == 0:
@@ -1508,6 +1552,8 @@ def main():
             print(f'   Remaining: {args.num_scenes - len(completed_scenes)}')
         else:
             print('\n[WARNING] Resume flag set but no checkpoint found, starting fresh')
+    if reset_acceptance_stats is not None:
+        reset_acceptance_stats()
     print('\n' + '=' * 70)
     print(f'GENERATING {args.num_scenes} SCENE SETS')
     print(f'Each with {args.num_counterfactuals} counterfactual variants')
@@ -1551,15 +1597,15 @@ def main():
             for idx, cf in enumerate(counterfactuals):
                 cf_cat = cf.get('cf_category', 'unknown')
                 print(f'    CF{idx + 1} [{cf_cat}] ({cf['type']}): {cf['description']}')
-            if locked_cf_types is None and len(counterfactuals) == args.num_counterfactuals:
-                locked_cf_types = [cf.get('type') for cf in counterfactuals]
             use_question_precheck = args.generate_questions and precheck_dual_cf_questions_viable is not None and (not getattr(args, 'no_question_precheck', False)) and (args.num_counterfactuals == 2)
             if use_question_precheck:
                 bo, c1, c2 = _scenes_with_metadata_for_precheck(base_scene, counterfactuals, scene_prefix)
-                ok, msg = precheck_dual_cf_questions_viable(bo, c1, c2, scene_index=i, strict_question_validation=not getattr(args, 'no_strict_validation', False), enforce_cf_question_group=True)
+                ok, msg = precheck_dual_cf_questions_viable(bo, c1, c2, scene_index=i, strict_question_validation=not getattr(args, 'no_strict_validation', False), enforce_cf_question_group=True, max_retries=150)
                 if not ok:
                     print(f'  [PRECHECK] No viable Q&A for mapping CSV ({msg}); resampling scene (attempt {precheck_attempt + 1}/{QUESTION_PRECHECK_MAX_SCENE_ATTEMPTS})...')
                     continue
+            if locked_cf_types is None and len(counterfactuals) == args.num_counterfactuals:
+                locked_cf_types = [cf.get('type') for cf in counterfactuals]
             scene_ready = True
             break
         if not base_scene or len(base_scene.get('objects', [])) == 0:
@@ -1594,6 +1640,11 @@ def main():
                 completed_scenes.add(i)
                 save_checkpoint(checkpoint_file, list(completed_scenes))
             print(f'  [OK] Rendered {render_success}/{total_to_render} images')
+            if write_acceptance_stats is not None:
+                try:
+                    write_acceptance_stats(run_dir, verbose=False)
+                except Exception:
+                    pass
         else:
             completed_scenes.add(i)
             save_checkpoint(checkpoint_file, list(completed_scenes))

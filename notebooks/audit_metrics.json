@@ -1,0 +1,798 @@
+{
+  "paper": {
+    "version": "paper",
+    "source": "AnonymousECCV15285/MMIB_Counterfactual_image_Dataset@5745473",
+    "n_rows": 100,
+    "answer_types": {
+      "count": 69,
+      "yes/no": 27,
+      "attribute": 4
+    },
+    "baselines": {
+      "count": {
+        "n": 69,
+        "mode": "2",
+        "mode_hits": 15,
+        "mode_accuracy": 0.21739130434782608,
+        "mode_accuracy_ci": [
+          0.13640646957336042,
+          0.328185192334121
+        ]
+      },
+      "yes/no": {
+        "n": 27,
+        "mode": "yes",
+        "mode_hits": 21,
+        "mode_accuracy": 0.7777777777777778,
+        "mode_accuracy_ci": [
+          0.5924270453692919,
+          0.8939290451059105
+        ],
+        "yes_hits": 21,
+        "yes_share": 0.7777777777777778,
+        "yes_share_ci": [
+          0.5924270453692919,
+          0.8939290451059105
+        ]
+      },
+      "attribute": {
+        "n": 4,
+        "mode": "matte",
+        "mode_hits": 2,
+        "mode_accuracy": 0.5,
+        "mode_accuracy_ci": [
+          0.15003570882017148,
+          0.8499642911798285
+        ]
+      },
+      "other": {
+        "n": 0,
+        "mode": null,
+        "mode_hits": 0,
+        "mode_accuracy": null
+      }
+    },
+    "unknown_cf_types": {},
+    "cf1_yes_both_images": 22,
+    "design_n": 86,
+    "design_hits": 42,
+    "design_rate": 0.4883720930232558,
+    "design_ci": [
+      0.38550397038221695,
+      0.59223462732753
+    ],
+    "design_by_type": [
+      {
+        "type": "add_object",
+        "n": 13,
+        "hits": 10,
+        "rate": 0.7692307692307693
+      },
+      {
+        "type": "change_color",
+        "n": 9,
+        "hits": 8,
+        "rate": 0.8888888888888888
+      },
+      {
+        "type": "change_material",
+        "n": 10,
+        "hits": 5,
+        "rate": 0.5
+      },
+      {
+        "type": "change_position",
+        "n": 8,
+        "hits": 0,
+        "rate": 0.0
+      },
+      {
+        "type": "change_shape",
+        "n": 7,
+        "hits": 2,
+        "rate": 0.2857142857142857
+      },
+      {
+        "type": "change_size",
+        "n": 8,
+        "hits": 7,
+        "rate": 0.875
+      },
+      {
+        "type": "relational_flip",
+        "n": 8,
+        "hits": 0,
+        "rate": 0.0
+      },
+      {
+        "type": "remove_object",
+        "n": 8,
+        "hits": 7,
+        "rate": 0.875
+      },
+      {
+        "type": "replace_object",
+        "n": 6,
+        "hits": 3,
+        "rate": 0.5
+      },
+      {
+        "type": "swap_attribute",
+        "n": 9,
+        "hits": 0,
+        "rate": 0.0
+      }
+    ],
+    "origq_n": 86,
+    "origq_hits": 19,
+    "origq_rate": 0.22093023255813954,
+    "origq_ci": [
+      0.14624794489136717,
+      0.3194784001425592
+    ],
+    "origq_by_type": [
+      {
+        "type": "add_object",
+        "n": 13,
+        "hits": 7,
+        "rate": 0.5384615384615384
+      },
+      {
+        "type": "change_color",
+        "n": 9,
+        "hits": 2,
+        "rate": 0.2222222222222222
+      },
+      {
+        "type": "change_material",
+        "n": 10,
+        "hits": 2,
+        "rate": 0.2
+      },
+      {
+        "type": "change_position",
+        "n": 8,
+        "hits": 0,
+        "rate": 0.0
+      },
+      {
+        "type": "change_shape",
+        "n": 7,
+        "hits": 0,
+        "rate": 0.0
+      },
+      {
+        "type": "change_size",
+        "n": 8,
+        "hits": 2,
+        "rate": 0.25
+      },
+      {
+        "type": "relational_flip",
+        "n": 8,
+        "hits": 0,
+        "rate": 0.0
+      },
+      {
+        "type": "remove_object",
+        "n": 8,
+        "hits": 3,
+        "rate": 0.375
+      },
+      {
+        "type": "replace_object",
+        "n": 6,
+        "hits": 2,
+        "rate": 0.3333333333333333
+      },
+      {
+        "type": "swap_attribute",
+        "n": 9,
+        "hits": 1,
+        "rate": 0.1111111111111111
+      }
+    ],
+    "hold_n": 114,
+    "hold_hits": 114,
+    "hold_rate": 1.0,
+    "hold_ci": [
+      0.9674003068525885,
+      1.0
+    ],
+    "hold_by_type": [
+      {
+        "type": "add_noise",
+        "n": 17,
+        "hits": 17,
+        "rate": 1.0
+      },
+      {
+        "type": "apply_blur",
+        "n": 18,
+        "hits": 18,
+        "rate": 1.0
+      },
+      {
+        "type": "apply_chromatic_aberration",
+        "n": 18,
+        "hits": 18,
+        "rate": 1.0
+      },
+      {
+        "type": "apply_vignette",
+        "n": 16,
+        "hits": 16,
+        "rate": 1.0
+      },
+      {
+        "type": "change_background",
+        "n": 16,
+        "hits": 16,
+        "rate": 1.0
+      },
+      {
+        "type": "change_lighting",
+        "n": 15,
+        "hits": 15,
+        "rate": 1.0
+      },
+      {
+        "type": "occlusion_change",
+        "n": 14,
+        "hits": 14,
+        "rate": 1.0
+      }
+    ],
+    "design_flip_ceiling": 0.7441860465116279,
+    "unresolved_n": 1,
+    "unresolved_rows": [
+      {
+        "row": 85,
+        "cell": "CF1 image \u00d7 original question",
+        "value": "not found",
+        "original_question": "Is the blue sphere matte or shiny?",
+        "cf1_type": "change_color"
+      }
+    ],
+    "constant_columns": [
+      {
+        "column": "counterfactual1_question_difficulty",
+        "value": "medium"
+      }
+    ],
+    "duplicate_rows": 0,
+    "duplicate_question_triples": 0,
+    "cf1_skill_values": [
+      "medium"
+    ],
+    "acceptance": {
+      "source": "not recorded"
+    }
+  },
+  "checks_only": {
+    "version": "checks_only",
+    "source": "output/dataset_v1_1/image_mapping_with_questions.csv",
+    "n_rows": 99,
+    "answer_types": {
+      "count": 59,
+      "yes/no": 40
+    },
+    "baselines": {
+      "count": {
+        "n": 59,
+        "mode": "3",
+        "mode_hits": 16,
+        "mode_accuracy": 0.2711864406779661,
+        "mode_accuracy_ci": [
+          0.17436824992508337,
+          0.39598005438289097
+        ]
+      },
+      "yes/no": {
+        "n": 40,
+        "mode": "yes",
+        "mode_hits": 25,
+        "mode_accuracy": 0.625,
+        "mode_accuracy_ci": [
+          0.47032160054531913,
+          0.7577722646420829
+        ],
+        "yes_hits": 25,
+        "yes_share": 0.625,
+        "yes_share_ci": [
+          0.47032160054531913,
+          0.7577722646420829
+        ]
+      },
+      "attribute": {
+        "n": 0,
+        "mode": null,
+        "mode_hits": 0,
+        "mode_accuracy": null
+      },
+      "other": {
+        "n": 0,
+        "mode": null,
+        "mode_hits": 0,
+        "mode_accuracy": null
+      }
+    },
+    "unknown_cf_types": {},
+    "cf1_yes_both_images": 0,
+    "design_n": 99,
+    "design_hits": 99,
+    "design_rate": 1.0,
+    "design_ci": [
+      0.9626454664260378,
+      1.0
+    ],
+    "design_by_type": [
+      {
+        "type": "add_object",
+        "n": 12,
+        "hits": 12,
+        "rate": 1.0
+      },
+      {
+        "type": "change_color",
+        "n": 18,
+        "hits": 18,
+        "rate": 1.0
+      },
+      {
+        "type": "change_material",
+        "n": 11,
+        "hits": 11,
+        "rate": 1.0
+      },
+      {
+        "type": "change_position",
+        "n": 3,
+        "hits": 3,
+        "rate": 1.0
+      },
+      {
+        "type": "change_shape",
+        "n": 12,
+        "hits": 12,
+        "rate": 1.0
+      },
+      {
+        "type": "change_size",
+        "n": 6,
+        "hits": 6,
+        "rate": 1.0
+      },
+      {
+        "type": "relational_flip",
+        "n": 7,
+        "hits": 7,
+        "rate": 1.0
+      },
+      {
+        "type": "remove_object",
+        "n": 14,
+        "hits": 14,
+        "rate": 1.0
+      },
+      {
+        "type": "replace_object",
+        "n": 7,
+        "hits": 7,
+        "rate": 1.0
+      },
+      {
+        "type": "swap_attribute",
+        "n": 9,
+        "hits": 9,
+        "rate": 1.0
+      }
+    ],
+    "origq_n": 99,
+    "origq_hits": 99,
+    "origq_rate": 1.0,
+    "origq_ci": [
+      0.9626454664260378,
+      1.0
+    ],
+    "origq_by_type": [
+      {
+        "type": "add_object",
+        "n": 12,
+        "hits": 12,
+        "rate": 1.0
+      },
+      {
+        "type": "change_color",
+        "n": 18,
+        "hits": 18,
+        "rate": 1.0
+      },
+      {
+        "type": "change_material",
+        "n": 11,
+        "hits": 11,
+        "rate": 1.0
+      },
+      {
+        "type": "change_position",
+        "n": 3,
+        "hits": 3,
+        "rate": 1.0
+      },
+      {
+        "type": "change_shape",
+        "n": 12,
+        "hits": 12,
+        "rate": 1.0
+      },
+      {
+        "type": "change_size",
+        "n": 6,
+        "hits": 6,
+        "rate": 1.0
+      },
+      {
+        "type": "relational_flip",
+        "n": 7,
+        "hits": 7,
+        "rate": 1.0
+      },
+      {
+        "type": "remove_object",
+        "n": 14,
+        "hits": 14,
+        "rate": 1.0
+      },
+      {
+        "type": "replace_object",
+        "n": 7,
+        "hits": 7,
+        "rate": 1.0
+      },
+      {
+        "type": "swap_attribute",
+        "n": 9,
+        "hits": 9,
+        "rate": 1.0
+      }
+    ],
+    "hold_n": 99,
+    "hold_hits": 99,
+    "hold_rate": 1.0,
+    "hold_ci": [
+      0.9626454664260378,
+      1.0
+    ],
+    "hold_by_type": [
+      {
+        "type": "add_noise",
+        "n": 22,
+        "hits": 22,
+        "rate": 1.0
+      },
+      {
+        "type": "apply_blur",
+        "n": 20,
+        "hits": 20,
+        "rate": 1.0
+      },
+      {
+        "type": "apply_chromatic_aberration",
+        "n": 15,
+        "hits": 15,
+        "rate": 1.0
+      },
+      {
+        "type": "apply_vignette",
+        "n": 14,
+        "hits": 14,
+        "rate": 1.0
+      },
+      {
+        "type": "change_background",
+        "n": 14,
+        "hits": 14,
+        "rate": 1.0
+      },
+      {
+        "type": "change_lighting",
+        "n": 14,
+        "hits": 14,
+        "rate": 1.0
+      }
+    ],
+    "design_flip_ceiling": 1.0,
+    "unresolved_n": 0,
+    "unresolved_rows": [],
+    "constant_columns": [],
+    "duplicate_rows": 0,
+    "duplicate_question_triples": 3,
+    "cf1_skill_values": [
+      "compare.attribute",
+      "compare.count",
+      "count.filter",
+      "count.filter.logical_or",
+      "exist",
+      "exist.filter",
+      "exist.filter.relate"
+    ],
+    "acceptance": {
+      "source": "generation log (lower bound)",
+      "attempts": 4600,
+      "accepted": 100,
+      "attempts_per_kept": 46.0,
+      "reject_reasons": {}
+    }
+  },
+  "regenerated": {
+    "version": "regenerated",
+    "source": "output/dataset_v1_1b/image_mapping_with_questions.csv",
+    "n_rows": 100,
+    "answer_types": {
+      "count": 67,
+      "yes/no": 31,
+      "attribute": 2
+    },
+    "baselines": {
+      "count": {
+        "n": 67,
+        "mode": "3",
+        "mode_hits": 17,
+        "mode_accuracy": 0.2537313432835821,
+        "mode_accuracy_ci": [
+          0.16487779577697392,
+          0.36929421614822255
+        ]
+      },
+      "yes/no": {
+        "n": 31,
+        "mode": "no",
+        "mode_hits": 16,
+        "mode_accuracy": 0.5161290322580645,
+        "mode_accuracy_ci": [
+          0.34840118286973176,
+          0.6803001396872117
+        ],
+        "yes_hits": 15,
+        "yes_share": 0.4838709677419355,
+        "yes_share_ci": [
+          0.31969986031278835,
+          0.6515988171302682
+        ]
+      },
+      "attribute": {
+        "n": 2,
+        "mode": "shiny",
+        "mode_hits": 1,
+        "mode_accuracy": 0.5,
+        "mode_accuracy_ci": [
+          0.09452865480086614,
+          0.9054713451991339
+        ]
+      },
+      "other": {
+        "n": 0,
+        "mode": null,
+        "mode_hits": 0,
+        "mode_accuracy": null
+      }
+    },
+    "unknown_cf_types": {},
+    "cf1_yes_both_images": 0,
+    "design_n": 100,
+    "design_hits": 100,
+    "design_rate": 1.0,
+    "design_ci": [
+      0.9630051925239981,
+      0.9999999999999999
+    ],
+    "design_by_type": [
+      {
+        "type": "add_object",
+        "n": 18,
+        "hits": 18,
+        "rate": 1.0
+      },
+      {
+        "type": "change_color",
+        "n": 10,
+        "hits": 10,
+        "rate": 1.0
+      },
+      {
+        "type": "change_material",
+        "n": 11,
+        "hits": 11,
+        "rate": 1.0
+      },
+      {
+        "type": "change_position",
+        "n": 3,
+        "hits": 3,
+        "rate": 1.0
+      },
+      {
+        "type": "change_shape",
+        "n": 8,
+        "hits": 8,
+        "rate": 1.0
+      },
+      {
+        "type": "change_size",
+        "n": 8,
+        "hits": 8,
+        "rate": 1.0
+      },
+      {
+        "type": "relational_flip",
+        "n": 4,
+        "hits": 4,
+        "rate": 1.0
+      },
+      {
+        "type": "remove_object",
+        "n": 14,
+        "hits": 14,
+        "rate": 1.0
+      },
+      {
+        "type": "replace_object",
+        "n": 7,
+        "hits": 7,
+        "rate": 1.0
+      },
+      {
+        "type": "swap_attribute",
+        "n": 17,
+        "hits": 17,
+        "rate": 1.0
+      }
+    ],
+    "origq_n": 100,
+    "origq_hits": 100,
+    "origq_rate": 1.0,
+    "origq_ci": [
+      0.9630051925239981,
+      0.9999999999999999
+    ],
+    "origq_by_type": [
+      {
+        "type": "add_object",
+        "n": 18,
+        "hits": 18,
+        "rate": 1.0
+      },
+      {
+        "type": "change_color",
+        "n": 10,
+        "hits": 10,
+        "rate": 1.0
+      },
+      {
+        "type": "change_material",
+        "n": 11,
+        "hits": 11,
+        "rate": 1.0
+      },
+      {
+        "type": "change_position",
+        "n": 3,
+        "hits": 3,
+        "rate": 1.0
+      },
+      {
+        "type": "change_shape",
+        "n": 8,
+        "hits": 8,
+        "rate": 1.0
+      },
+      {
+        "type": "change_size",
+        "n": 8,
+        "hits": 8,
+        "rate": 1.0
+      },
+      {
+        "type": "relational_flip",
+        "n": 4,
+        "hits": 4,
+        "rate": 1.0
+      },
+      {
+        "type": "remove_object",
+        "n": 14,
+        "hits": 14,
+        "rate": 1.0
+      },
+      {
+        "type": "replace_object",
+        "n": 7,
+        "hits": 7,
+        "rate": 1.0
+      },
+      {
+        "type": "swap_attribute",
+        "n": 17,
+        "hits": 17,
+        "rate": 1.0
+      }
+    ],
+    "hold_n": 100,
+    "hold_hits": 100,
+    "hold_rate": 1.0,
+    "hold_ci": [
+      0.9630051925239981,
+      0.9999999999999999
+    ],
+    "hold_by_type": [
+      {
+        "type": "add_noise",
+        "n": 14,
+        "hits": 14,
+        "rate": 1.0
+      },
+      {
+        "type": "apply_blur",
+        "n": 15,
+        "hits": 15,
+        "rate": 1.0
+      },
+      {
+        "type": "apply_chromatic_aberration",
+        "n": 15,
+        "hits": 15,
+        "rate": 1.0
+      },
+      {
+        "type": "apply_vignette",
+        "n": 18,
+        "hits": 18,
+        "rate": 1.0
+      },
+      {
+        "type": "change_background",
+        "n": 18,
+        "hits": 18,
+        "rate": 1.0
+      },
+      {
+        "type": "change_lighting",
+        "n": 20,
+        "hits": 20,
+        "rate": 1.0
+      }
+    ],
+    "design_flip_ceiling": 1.0,
+    "unresolved_n": 0,
+    "unresolved_rows": [],
+    "constant_columns": [],
+    "duplicate_rows": 0,
+    "duplicate_question_triples": 3,
+    "cf1_skill_values": [
+      "compare.attribute",
+      "compare.count",
+      "count.filter",
+      "count.filter.logical_or",
+      "exist",
+      "exist.filter",
+      "exist.filter.relate",
+      "query.material_binary"
+    ],
+    "acceptance": {
+      "source": "instrumented",
+      "attempts": 7902,
+      "accepted": 100,
+      "attempts_per_kept": 79.02,
+      "reject_reasons": {
+        "cf1_question_none": 3285,
+        "cf1_template_group": 4326,
+        "cf1_questions_same_answer": 75,
+        "quota": 63,
+        "unresolved": 53,
+        "quota_fallback": 2
+      },
+      "quota_fallbacks": 2
+    }
+  }
+}

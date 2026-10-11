@@ -5,7 +5,7 @@ colorTo: indigo
 sdk: docker
 pinned: false
 license: mit
-short_description: CLEVR-style scenes with semantic and negative counterfactuals
+short_description: CLEVR scenes with semantic and negative counterfactuals
 ---
 
 Generate CLEVR-style scene triplets (original, semantic counterfactual, perturbation) with Blender, plus questions and a 3×3 answer matrix for the MMIB VQA benchmark. Configurable object counts, counterfactual types, and automated questions and answers.

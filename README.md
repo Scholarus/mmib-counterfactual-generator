@@ -5,10 +5,10 @@ colorTo: indigo
 sdk: docker
 pinned: false
 license: mit
-arxiv: 2401.xxxxx
+short_description: CLEVR-style scenes with semantic and negative counterfactuals
 ---
 
-A Python-based pipeline for CLEVR-style scenes with counterfactual variants and Blender rendering. Configurable object counts, counterfactual types, and automated questions and answers.
+Generate CLEVR-style scene triplets (original, semantic counterfactual, perturbation) with Blender, plus questions and a 3×3 answer matrix for the MMIB VQA benchmark. Configurable object counts, counterfactual types, and automated questions and answers.
 
 **Key Features:**
 - 17 different counterfactual types (9 image CFs + 8 negative CFs)
